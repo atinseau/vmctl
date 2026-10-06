@@ -74,6 +74,10 @@ Write-Output $x
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'Open is supported only') 'Option ouverture reservee a installation streaming avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'gpu-setup','-Vm','test','-Reconnect','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'Reconnect is supported only') 'Option reconnexion reservee a ouverture streaming avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'gpu-setup','-Vm','test','-Application','Desktop','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'Application is supported only') 'Application Moonlight refusee hors ouverture streaming avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-open','-Vm','test','-Application','Desktop','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-open requires') 'Application Desktop refusee sur cible SSH avant tout lancement'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-status requires') 'Changement encodeur refuse sur cible SSH avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-Diagnostics','-Config',$config)
@@ -84,6 +88,14 @@ Write-Output $x
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'ConsoleDisplay require streaming-video-test') 'Options de capture refusees hors diagnostic video avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'gpu-setup','-Vm','test','-OnlyDisplay','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'OnlyDisplay requires streaming-video-test') 'Ecran virtuel seul refuse hors commande video avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'gpu-setup','-Vm','test','-PrimaryDisplay','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'PrimaryDisplay requires streaming-video-test') 'Ecran principal refuse hors commande video avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-status','-Vm','test','-DisableRealtimePriority','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'DisableRealtimePriority requires') 'Priorite NVENC refusee hors test video avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-DisableRealtimePriority','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'DisableRealtimePriority requires') 'Priorite NVENC refusee avec encodeur logiciel avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','nvenc','-PrimaryDisplay','-OnlyDisplay','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'mutually exclusive') 'Ecran principal et ecran seul incompatibles refuses avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','nvenc','-OnlyDisplay','-ConsoleDisplay','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'mutually exclusive') 'Deux profils de moniteur incompatibles refuses avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-access','-Vm','test','-Config',$config)

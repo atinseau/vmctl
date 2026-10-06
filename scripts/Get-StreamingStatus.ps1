@@ -8,12 +8,14 @@ param(
     [switch]$Diagnostics,
     [ValidateSet('status','display-fix','display-restore','video-test','video-restore')][string]$Mode='status',
     [ValidateSet('software','nvenc')][string]$Encoder,
-    [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay
+    [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay, [switch]$PrimaryDisplay, [switch]$DisableRealtimePriority
 )
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../src/DataPaths.ps1')
 if ($Mode -eq 'video-test' -and -not $Encoder) { throw 'video-test requires an encoder.' }
 if ($ConsoleDisplay -and $OnlyDisplay) { throw 'ConsoleDisplay and OnlyDisplay are mutually exclusive.' }
+if ($PrimaryDisplay -and ($ConsoleDisplay -or $OnlyDisplay)) { throw 'PrimaryDisplay, ConsoleDisplay and OnlyDisplay are mutually exclusive.' }
+if ($DisableRealtimePriority -and ($Mode -ne 'video-test' -or $Encoder -ne 'nvenc')) { throw 'DisableRealtimePriority requires video-test with nvenc.' }
 $credentialPath=Join-Path (Get-VmctlDataRoot) "credentials\apollo-$Vm.clixml"
 if (-not(Test-Path -LiteralPath $credentialPath)) { throw 'The saved Apollo administrator credential is missing.' }
 $registry='HKCU:\Software\Moonlight Game Streaming Project\Moonlight\hosts'
@@ -25,7 +27,9 @@ if(Test-Path -LiteralPath $bindingPath) {
     $serverUuid=[guid]::Parse($binding.serverUuid).ToString()
 }
 $hosts=@(Get-ChildItem -LiteralPath $registry -ErrorAction Stop | ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath } | Where-Object {
-    (($serverUuid -and $_.uuid -ieq $serverUuid) -or (-not $serverUuid -and $_.hostname -ieq $VmName)) -and (-not $HostName -or $HostName -in @($_.localaddress,$_.manualaddress,$_.remoteaddress))
+    # With a saved UUID, HostName can override a stale DHCP address. TLS remains
+    # pinned to that UUID's paired certificate before credentials are sent.
+    (($serverUuid -and $_.uuid -ieq $serverUuid) -or (-not $serverUuid -and $_.hostname -ieq $VmName -and (-not $HostName -or $HostName -in @($_.localaddress,$_.manualaddress,$_.remoteaddress))))
 })
 if ($hosts.Count -ne 1 -or -not $hosts[0].srvcert) { throw 'Select a unique paired Moonlight host with its stored server certificate.' }
 $selected=$hosts[0]
@@ -103,6 +107,7 @@ try {
                 $settingsToSave.hevc_mode='1'
                 $settingsToSave.av1_mode='1'
                 $settingsToSave.min_log_level='debug'
+                if ($DisableRealtimePriority) { $settingsToSave.nvenc_realtime_hags='disabled' }
                 if ($DefaultAdapter) { $settingsToSave.adapter_name='' }
                 if ($ConsoleDisplay) {
                     $settingsToSave.headless_mode='disabled'
@@ -114,11 +119,16 @@ try {
                     $settingsToSave.output_name=''
                     $settingsToSave.dd_configuration_option='ensure_only_display'
                 }
+                if ($PrimaryDisplay) {
+                    $settingsToSave.headless_mode='enabled'
+                    $settingsToSave.output_name=''
+                    $settingsToSave.dd_configuration_option='ensure_primary'
+                }
             }
         } else {
             $saved=Import-Clixml -LiteralPath $backup
             $previousSettings=([Net.NetworkCredential]::new('',[Security.SecureString]$saved).Password | ConvertFrom-Json -AsHashtable)
-            $restoreKeys=if ($Mode -eq 'video-restore') { @('encoder','hevc_mode','av1_mode','min_log_level','adapter_name','headless_mode','output_name','dd_configuration_option') } else { @('dd_configuration_option','dd_config_revert_on_disconnect','dd_resolution_option','dd_refresh_rate_option','min_log_level') }
+            $restoreKeys=if ($Mode -eq 'video-restore') { @('encoder','hevc_mode','av1_mode','min_log_level','adapter_name','headless_mode','output_name','dd_configuration_option','nvenc_realtime_hags') } else { @('dd_configuration_option','dd_config_revert_on_disconnect','dd_resolution_option','dd_refresh_rate_option','min_log_level') }
             foreach($setting in $restoreKeys) {
                 if ($previousSettings.ContainsKey($setting)) { $settingsToSave[$setting]=$previousSettings[$setting] }
                 else { $settingsToSave.Remove($setting) }
@@ -136,6 +146,7 @@ try {
         $verified=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
         if ($Mode -eq 'display-fix' -and ($verified.dd_configuration_option -ne $settingsToSave.dd_configuration_option -or $verified.dd_resolution_option -ne 'auto' -or $verified.dd_refresh_rate_option -ne 'auto')) { throw 'The requested display configuration was not saved.' }
         if ($Mode -eq 'video-test' -and $verified.encoder -ne $Encoder) { throw 'The requested encoder was not saved.' }
+        if ($DisableRealtimePriority -and $verified.nvenc_realtime_hags -ne 'disabled') { throw 'NVENC realtime priority was not disabled.' }
         $response.Dispose(); $response=$null
         $content=[Net.Http.StringContent]::new('{}',[Text.Encoding]::UTF8,'application/json')
         # Apollo may close this connection when restarting; verify its return afterward.
@@ -150,7 +161,7 @@ try {
             } catch { $ready=$false }
         } until ($ready -or [DateTimeOffset]::UtcNow -ge $deadline)
         if (-not $ready) { throw 'Apollo did not return after restarting.' }
-        $configurationResult=@{mode=$Mode;encoder=$verified.encoder;primaryDisplay=$verified.dd_configuration_option;revertOnDisconnect=$verified.dd_config_revert_on_disconnect;encryptedBackup=$backup;apolloRestarted=$true}
+        $configurationResult=@{mode=$Mode;encoder=$verified.encoder;primaryDisplay=$verified.dd_configuration_option;nvencRealtimeHags=$verified.nvenc_realtime_hags;revertOnDisconnect=$verified.dd_config_revert_on_disconnect;encryptedBackup=$backup;apolloRestarted=$true}
     }
     $diagnostic=$null
     if ($Diagnostics) {
@@ -166,7 +177,8 @@ try {
             videoSettings=($settings | Select-Object adapter_name,output_name,capture,encoder,headless_mode,nvenc_realtime_hags,nvenc_latency_over_power,dd_configuration_option,dd_resolution_option,dd_refresh_rate_option,hevc_mode,av1_mode,min_log_level,vdisplayStatus)
             displayLog=@($safeLines | Where-Object { $_ -match 'Error:|Warning:|CLIENT |Virtual Display|virtual display|Winlogon|SESSION|session|display_device|\bprimary\b|configuration|optimization|Desktop switch|display name|Display:' } | Select-Object -Last 100)
             log=@($safeLines | Where-Object { $_ -match 'Error:|Warning:|Device Description|Feature Level|Capture size|Desktop resolution|Display refresh rate|Requested frame rate|Creating encoder|NvEnc:|CLIENT |Virtual Display|virtual display|desktop switch|Winlogon|SESSION|session' } | Select-Object -Last 90)
-            debugLog=@($safeLines | Where-Object { $_ -match 'Debug:' -and $_ -match 'captur|frame|desktop|timeout|DXGI|D3D|duplicat|encode|switch|display' } | Select-Object -Last 80)
+            debugLog=@($safeLines | Where-Object { $_ -match 'Debug:' -and $_ -match 'captur|frame|desktop|timeout|DXGI|D3D|duplicat|encode|switch|display|is_user_session_locked' } | Select-Object -Last 80)
+            sessionLockLog=@($safeLines | Where-Object { $_ -match 'is_user_session_locked:' } | Select-Object -Last 5)
         }
     }
     [pscustomobject]@{

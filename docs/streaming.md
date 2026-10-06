@@ -12,6 +12,8 @@ vmctl streaming-install -Vm autre-vm -CredentialFile C:\Temp\guest.clixml -Repor
 
 Cette recette installe Moonlight 6.2.0 sur l'hote et Apollo 0.4.6 dans la VM avec leurs installateurs officiels et leurs empreintes SHA-256 GitHub. Elle active le service Apollo au demarrage, restreint les regles pare-feu Apollo au sous-reseau local, initialise le compte administrateur de l'interface et effectue l'appairage avec le CLI officiel Moonlight. Les commandes, transferts et appels de configuration dans la VM passent par vmctl. Cette commande ne cree pas d'adaptateur GPU-P. Si un unique GPU NVIDIA est deja affecte et sain dans l'invite, elle configure automatiquement Apollo pour NVENC et le mode headless, avec l'ecran virtuel seul pendant le flux et la resolution/frequence automatiques demandees par Moonlight, en conservant les autres reglages et une copie avant modification. Les checkpoints ne sont pas modifies.
 
+La recette GPU-P desactive maintenant `nvenc_realtime_hags` : NVENC garde une priorite GPU haute plutot que temps reel. [Sunshine documente des gels NVIDIA avec HAGS, priorite temps reel et VRAM presque pleine](https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2configuration.html#nvenc_realtime_hags). Ce choix limite un risque connu ; il ne garantit pas la stabilite du partage GPU sur Windows 11/GeForce.
+
 Une elevation UAC est lancee si le terminal n'est pas administrateur. La commande retourne le PID et le fichier d'etat : lancement ne signifie pas installation terminee. Attendre `installed-and-paired` dans `streaming-status.json` ; `failed` contient le diagnostic. Le dossier par defaut est `%USERPROFILE%\.vmctl\reports\streaming\<Vm>`. Le mot de passe du compte de gestion est saisi dans une fenetre Windows. La session elevee reutilise ce cache DPAPI lors des reprises : relancer la meme commande apres un echec pendant ses 30 minutes de validite. Il est supprime au succes ou a l'expiration. Aucun PIN Moonlight n'est a saisir manuellement. `-Config` et les alias dont `vmName` differe sont transmis aux appels internes.
 
 Avec un GPU-P NVIDIA sain, le setup sauvegarde GpuVirtualizationFlags puis retire son bit 0x8 si necessaire pour separer le rendu de la console Hyper-V. Les autres bits sont conserves. Ce changement ou un code installateur 3010 provoque un redemarrage via `vmctl`, une attente de PowerShell Direct et une nouvelle verification Apollo/SudoVDA. Le meme mot de passe est reutilise. Une relance avec un reglage deja applique ne redemarre pas la VM pour cette raison.
@@ -57,6 +59,28 @@ vmctl streaming-video-test -Vm win-vm -Encoder nvenc
 vmctl streaming-video-test -Vm win-vm -Encoder software -DefaultAdapter -ConsoleDisplay
 vmctl streaming-video-restore -Vm win-vm
 ```
+
+Le profil `-ConsoleDisplay` doit etre teste avec l'application `Desktop`, car l'application `Virtual Display` cree encore un ecran virtuel meme quand le mode headless est desactive :
+
+```powershell
+vmctl streaming-open -Vm win-vm -Application Desktop -Reconnect
+```
+
+`-Reconnect` termine proprement le flux et l'ancienne application de bureau avant de changer d'application. Ce mode sert notamment a recuperer l'ecran de connexion ; un moniteur Hyper-V peut rester en 1024x768. Apres ouverture de la session, deconnecter avant tout changement de profil GPU. `-PrimaryDisplay` permet de conserver la console Hyper-V active pendant que l'ecran virtuel devient principal ; `-OnlyDisplay` desactive les autres sorties. Ces deux options et `-ConsoleDisplay` sont incompatibles.
+
+```powershell
+# Modifier Apollo sans ouvrir de flux :
+vmctl streaming-video-test -Vm win-vm -Encoder nvenc -PrimaryDisplay -DisableRealtimePriority
+vmctl streaming-status -Vm win-vm -Diagnostics
+```
+
+`-DisableRealtimePriority` exige NVENC et verifie que `nvenc_realtime_hags=disabled` est enregistre. `streaming-video-restore` restaure aussi ce champ depuis la premiere sauvegarde. Si l'adresse DHCP a change, `-HostName <nouvelle IPv4>` permet le diagnostic et les modifications avec le UUID deja lie ; le certificat TLS appaire reste verifie avant l'envoi des identifiants. Moonlight retrouve aussi le serveur par son UUID via sa decouverte reseau, sans nouvel appairage.
+
+Dernier essai du 6 octobre : `ensure_only_display` produisait encore une capture noire en boucle. `ensure_primary` a donne une image visible et fluide en NVENC 1080p120, confirmee par l'utilisateur, mais le PC hote a ensuite subi un arret brutal. Kernel-Power 41 avait un code bugcheck nul ; aucun ecran bleu exploitable n'est etabli. Les rapports de crash etaient desactives sur l'hote (`CrashDumpEnabled=0`, `LogEvent=0`) et LiveKernelReports n'etait pas accessible depuis la session normale. Le pilote hote est NVIDIA 617.14. Un [autre signalement GPU-P/NVENC](https://github.com/LizardByte/Sunshine/issues/4750) concerne un pilote 551.78 corrige par 591.59 ; il ne suffit pas a expliquer cet arret avec 617.14.
+
+Apres redemarrage, `nvenc_realtime_hags=disabled` et `ensure_primary` ont ete appliques et relus via vmctl, le certificat du serveur a ete verifie et Apollo a redemarre. Aucun nouveau flux n'a ete ouvert pour valider cette precaution sous charge. La cause du crash et la stabilite apres correction restent a confirmer ; les essais historiques ci-dessous ne constituent pas cette validation. Pour le prochain essai surveille, sauvegarder le travail de l'hote et commencer a 60 FPS dans Moonlight avant de retester 120 FPS.
+
+`videoDeliveryVerified` confirme l'arrivee de paquets video et le decodeur, pas le contenu des pixels. Le 6 octobre, un Windows verrouille produisait un flux noir avec une boucle de recreation de la capture GPU. Verifier l'image et surveiller les journaux Apollo apres plusieurs reconnexions, en session ouverte puis verrouillee, avant de valider un setup.
 
 La correction d'affichage demande un ecran principal, ou l'ecran virtuel seul si headless et NVIDIA sont configures, avec retablissement a la deconnexion et resolution/frequence auto. Elle remet les journaux au niveau info. display-restore restaure ces cinq champs depuis la premiere sauvegarde. Le test video modifie encoder/hevc_mode/av1_mode/min_log_level. `-DefaultAdapter` retire temporairement le GPU force ; `-ConsoleDisplay` desactive headless et les changements de topologie pour tester Desktop sur le moniteur Hyper-V. `-OnlyDisplay` active headless et ensure_only_display ; ces deux options sont incompatibles. video-restore remet les quatre champs video et adapter_name/headless_mode/output_name/dd_configuration_option. Chaque famille conserve sa premiere sauvegarde DPAPI locale et redemarre Apollo. Une session Moonlight connectee bloque ces modifications.
 

@@ -14,10 +14,11 @@ param(
     [ValidateSet('powershell.exe', 'pwsh.exe', 'sh', 'bash')][string]$Shell,
     [ValidateRange(1, 86400)][int]$TimeoutSeconds = 120,
     [string]$Config, [switch]$Recursive, [switch]$Open, [switch]$Reconnect,
+    [ValidateSet('Virtual Display','Desktop')][string]$Application = 'Virtual Display',
     [string]$OutFile, [string]$Frame, [string]$Text, [string]$Keys, [string]$ReportDirectory,
     [string]$GpuName='NVIDIA GeForce RTX 4090', [ValidateRange(1,100)][int]$GpuPercent=25,
     [ValidateSet('software','nvenc')][string]$Encoder,
-    [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay,
+    [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay, [switch]$PrimaryDisplay, [switch]$DisableRealtimePriority,
     [int]$X = -1, [int]$Y = -1, [int]$ToX = -1, [int]$ToY = -1,
     [ValidateRange(1, 5)][int]$ButtonIndex = 1,
     [ValidateRange(1, 2)][int]$Count = 1, [int]$Delta,
@@ -46,7 +47,7 @@ vmctl : PowerShell Direct (Hyper-V Windows local), SSH et console optionnelle
   vmctl compact -Vm win-vm -TimeoutSeconds 900
   vmctl compact -Vm win-vm -RemoveCheckpoints -TimeoutSeconds 1800
   vmctl streaming-install -Vm win-vm [-Open] [-CredentialFile PATH] [-ReportDirectory PATH]
-  vmctl streaming-open -Vm win-vm [-Reconnect]
+  vmctl streaming-open -Vm win-vm [-Reconnect] [-Application 'Virtual Display'|Desktop]
   vmctl streaming-access -Vm win-vm
   vmctl streaming-forget -Vm win-vm [-HostName IPv4]
   vmctl streaming-status -Vm win-vm [-HostName IPv4]
@@ -55,6 +56,8 @@ vmctl : PowerShell Direct (Hyper-V Windows local), SSH et console optionnelle
   vmctl streaming-video-test -Vm win-vm -Encoder software|nvenc
   vmctl streaming-video-test -Vm win-vm -Encoder software -DefaultAdapter -ConsoleDisplay
   vmctl streaming-video-test -Vm win-vm -Encoder nvenc -OnlyDisplay
+  vmctl streaming-video-test -Vm win-vm -Encoder nvenc -PrimaryDisplay
+  vmctl streaming-video-test -Vm win-vm -Encoder nvenc -PrimaryDisplay -DisableRealtimePriority
   vmctl streaming-video-restore -Vm win-vm
   vmctl gpu-setup -Vm win-vm -GpuName 'NVIDIA GeForce RTX 4090' -GpuPercent 25 [-Elevate]
   vmctl gpu-status|gpu-sync|gpu-remove|gpu-task-test -Vm win-vm [-Elevate]
@@ -110,10 +113,14 @@ Les autres codes sont ceux du programme distant (ou de scp).
     if ($Encoder -and $Action -ne 'streaming-video-test') { throw '-Encoder is supported only with streaming-video-test.' }
     if (($DefaultAdapter -or $ConsoleDisplay) -and $Action -ne 'streaming-video-test') { throw '-DefaultAdapter and -ConsoleDisplay require streaming-video-test.' }
     if ($OnlyDisplay -and $Action -ne 'streaming-video-test') { throw '-OnlyDisplay requires streaming-video-test.' }
+    if ($PrimaryDisplay -and $Action -ne 'streaming-video-test') { throw '-PrimaryDisplay requires streaming-video-test.' }
+    if ($DisableRealtimePriority -and ($Action -ne 'streaming-video-test' -or $Encoder -ne 'nvenc')) { throw '-DisableRealtimePriority requires streaming-video-test -Encoder nvenc.' }
+    if ($PrimaryDisplay -and ($OnlyDisplay -or $ConsoleDisplay)) { throw '-PrimaryDisplay, -OnlyDisplay and -ConsoleDisplay are mutually exclusive.' }
     if ($OnlyDisplay -and $ConsoleDisplay) { throw '-OnlyDisplay and -ConsoleDisplay are mutually exclusive.' }
     if ($Diagnostics -and $Action -ne 'streaming-status') { throw '-Diagnostics is supported only with streaming-status.' }
     if ($Open -and $Action -ne 'streaming-install') { throw '-Open is supported only with streaming-install.' }
     if ($Reconnect -and $Action -ne 'streaming-open') { throw '-Reconnect is supported only with streaming-open.' }
+    if ($PSBoundParameters.ContainsKey('Application') -and $Action -ne 'streaming-open') { throw '-Application is supported only with streaming-open.' }
     if ($Action -eq 'register') {
         if (-not $Vm -or $Vm -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]*$') { throw 'register exige un -Vm valide.' }
         if (-not $Os) { throw 'register exige -Os.' }
@@ -225,7 +232,7 @@ Les autres codes sont ceux du programme distant (ou de scp).
     switch ($Action) {
         'streaming-open' {
             if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'streaming-open requires a local Hyper-V Windows target.' }
-            $openArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'scripts\Open-StreamingHost.ps1'),'-Vm',$Vm,'-VmName',$target.vmName)
+            $openArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'scripts\Open-StreamingHost.ps1'),'-Vm',$Vm,'-VmName',$target.vmName,'-Application',$Application)
             if($target.ContainsKey('vmId')){$openArgs+=@('-VmId',$target.vmId)}
             if($Reconnect){$openArgs+='-Reconnect'}
             $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $openArgs -TimeoutSeconds $TimeoutSeconds
@@ -250,6 +257,8 @@ Les autres codes sont ceux du programme distant (ou de scp).
             if ($DefaultAdapter) { $streamingArgs+='-DefaultAdapter' }
             if ($ConsoleDisplay) { $streamingArgs+='-ConsoleDisplay' }
             if ($OnlyDisplay) { $streamingArgs+='-OnlyDisplay' }
+            if ($PrimaryDisplay) { $streamingArgs+='-PrimaryDisplay' }
+            if ($DisableRealtimePriority) { $streamingArgs+='-DisableRealtimePriority' }
             $streamingArgs+=@('-Mode',$Action.Substring(10))
             $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $streamingArgs -TimeoutSeconds $TimeoutSeconds
         }

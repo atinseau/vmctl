@@ -1,7 +1,8 @@
 #requires -Version 7.2
 param(
     [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')][string]$Vm,
-    [Parameter(Mandatory)][string]$VmName,[string]$VmId,[switch]$Reconnect
+    [Parameter(Mandatory)][string]$VmName,[string]$VmId,[switch]$Reconnect,
+    [ValidateSet('Virtual Display','Desktop')][string]$Application='Virtual Display'
 )
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../src/Vmctl.psm1') -Force
@@ -17,6 +18,10 @@ $moonlight=Join-Path $env:ProgramFiles 'Moonlight Game Streaming\Moonlight.exe'
 $reportDirectory=Join-Path (Get-VmctlDataRoot) "reports\streaming\$Vm"
 $activePath=Join-Path $reportDirectory 'streaming-active.json'
 $null=New-Item -ItemType Directory -Path $reportDirectory -Force
+$saved=if(Test-Path -LiteralPath $activePath){Get-Content -LiteralPath $activePath -Raw|ConvertFrom-Json}else{$null}
+$previousApplication=if($saved -and $saved.PSObject.Properties.Name -contains 'application') {[string]$saved.application} else {'Virtual Display'}
+$changingApplication=($saved -and $previousApplication -ne $Application)
+if($changingApplication -and -not $Reconnect){throw 'Changing the streaming application requires -Reconnect.'}
 $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Moonlight Game Streaming Project\Moonlight')
 try {
     $fps=[int]$key.GetValue('fps',60)
@@ -29,7 +34,6 @@ $alreadyOpen=$false;$logPath=''
 if($processes.Count) {
     if($processes.Count -ne 1){throw 'Multiple Moonlight processes require review.'}
     $process=$processes[0]
-    $saved=if(Test-Path -LiteralPath $activePath){Get-Content -LiteralPath $activePath -Raw|ConvertFrom-Json}else{$null}
     $savedMatches=($saved -and $saved.serverUuid -ieq $uuid -and $saved.pid -eq $process.Id -and $saved.startTicks -eq $process.StartTime.ToUniversalTime().Ticks)
     $commandLine=(Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)").CommandLine
     if(-not $savedMatches -and (-not $commandLine -or $commandLine -notmatch ([regex]::Escape($uuid)))){throw 'The open Moonlight process cannot be identified as this VM; close it first.'}
@@ -46,12 +50,18 @@ if($processes.Count) {
     }
 }
 if(-not $alreadyOpen) {
+    if($changingApplication) {
+        # These two desktop applications have no user game process to terminate.
+        # End the paused virtual-display application before opening the console.
+        $quit=Invoke-VmctlProcess $moonlight @('quit',$uuid) -TimeoutSeconds 30
+        if($quit.ExitCode -ne 0){throw "Could not end the previous desktop stream: $($quit.Stderr)"}
+    }
     $list=Invoke-VmctlProcess $moonlight @('list',$uuid) -TimeoutSeconds 45
-    if($list.ExitCode -ne 0 -or $list.Stdout -notmatch 'Virtual Display'){throw "The paired Virtual Display is unavailable: $($list.Stderr)"}
+    if($list.ExitCode -ne 0 -or $list.Stdout -notmatch ('(?m)^\s*'+[regex]::Escape($Application)+'\s*\r?$')){throw "The paired application '$Application' is unavailable: $($list.Stderr)"}
     # ShellExecute detaches the GUI from redirected CLI pipes; Moonlight supplies
     # its own TEMP log. Inherited pipes can otherwise leave the caller stuck.
     $mouseOption=if($absolute){'--absolute-mouse'}else{'--no-absolute-mouse'}
-    $arguments="stream $uuid `"Virtual Display`" --resolution ${width}x${height} --fps $fps --video-codec H.264 $mouseOption --display-mode windowed"
+    $arguments="stream $uuid `"$Application`" --resolution ${width}x${height} --fps $fps --video-codec H.264 $mouseOption --display-mode windowed"
     $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         $newPid=& (Join-Path $PSScriptRoot 'Start-InteractiveProcess.ps1') -Executable $moonlight -Arguments $arguments -WorkingDirectory (Split-Path $moonlight)
@@ -62,7 +72,7 @@ if(-not $alreadyOpen) {
         $process=[Diagnostics.Process]::Start($info)
     }
 }
-$record=@{vm=$Vm;serverUuid=$uuid;pid=$process.Id;startTicks=$process.StartTime.ToUniversalTime().Ticks;resolution="${width}x${height}";fps=$fps;absoluteMouse=$absolute;logPath=$logPath}
+$record=@{vm=$Vm;serverUuid=$uuid;application=$Application;pid=$process.Id;startTicks=$process.StartTime.ToUniversalTime().Ticks;resolution="${width}x${height}";fps=$fps;absoluteMouse=$absolute;logPath=$logPath}
 $record|ConvertTo-Json|Set-Content -LiteralPath $activePath
 $deadline=(Get-Date).AddSeconds(30)
 do {

@@ -50,6 +50,9 @@ try {
         if (-not(Test-Path -LiteralPath $backup)) { $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $backup -Encoding utf8 }
         $settings.adapter_name=[string]$request.gpuName
         $settings.encoder='nvenc'
+        # Sunshine documents NVIDIA freezes with realtime priority and HAGS.
+        # Use high priority for this GPU-P recipe; do not change host scheduling.
+        $settings.nvenc_realtime_hags='disabled'
         $settings.headless_mode='enabled'
         # GPU-P capture can continuously lose access while the Hyper-V output is active.
         # Restore the console topology when streaming ends.
@@ -60,7 +63,7 @@ try {
         $result=Invoke-LocalApi '/api/config' $settings
         if (-not $result.status) { throw 'Apollo GPU configuration rejected.' }
         $saved=Get-LocalApi '/api/config'
-        if ($saved.encoder -ne 'nvenc' -or $saved.adapter_name -cne $request.gpuName) { throw 'Apollo GPU settings were not saved.' }
+        if ($saved.encoder -ne 'nvenc' -or $saved.adapter_name -cne $request.gpuName -or $saved.nvenc_realtime_hags -ne 'disabled') { throw 'Apollo GPU settings were not saved.' }
         Restart-Service -Name ApolloService -ErrorAction Stop
         $deadline=(Get-Date).AddSeconds(30)
         do {
@@ -68,7 +71,7 @@ try {
             if ((Get-Date) -ge $deadline) { throw 'Apollo web service did not return after its restart.' }
             Start-Sleep -Seconds 1
         } while ($true)
-        $gpuConfig=@{adapter=$saved.adapter_name;encoder=$saved.encoder;headless=$saved.headless_mode;backup=$backup;serviceRestarted=$true}
+        $gpuConfig=@{adapter=$saved.adapter_name;encoder=$saved.encoder;headless=$saved.headless_mode;nvencRealtimeHags=$saved.nvenc_realtime_hags;backup=$backup;serviceRestarted=$true}
     }
     [pscustomobject]@{action=$request.action;authenticated=$true;runningVersion=$runningConfig.version;pinAccepted=$pinAccepted;gpuConfig=$gpuConfig} | ConvertTo-Json -Depth 5
 } finally {
