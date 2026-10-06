@@ -11,12 +11,13 @@ param(
     [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay
 )
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot '../src/DataPaths.ps1')
 if ($Mode -eq 'video-test' -and -not $Encoder) { throw 'video-test requires an encoder.' }
 if ($ConsoleDisplay -and $OnlyDisplay) { throw 'ConsoleDisplay and OnlyDisplay are mutually exclusive.' }
-$credentialPath=Join-Path $env:LOCALAPPDATA "vmctl\credentials\apollo-$Vm.clixml"
+$credentialPath=Join-Path (Get-VmctlDataRoot) "credentials\apollo-$Vm.clixml"
 if (-not(Test-Path -LiteralPath $credentialPath)) { throw 'The saved Apollo administrator credential is missing.' }
 $registry='HKCU:\Software\Moonlight Game Streaming Project\Moonlight\hosts'
-$bindingPath=Join-Path $env:LOCALAPPDATA "vmctl\streaming-bindings\$Vm.json"
+$bindingPath=Join-Path (Get-VmctlDataRoot) "streaming-bindings\$Vm.json"
 $serverUuid=''
 if(Test-Path -LiteralPath $bindingPath) {
     $binding=Get-Content -LiteralPath $bindingPath -Raw|ConvertFrom-Json
@@ -83,7 +84,7 @@ try {
         foreach($property in $current.PSObject.Properties) {
             if ($property.Name -notin @('status','platform','version','vdisplayStatus')) { $settingsToSave[$property.Name]=$property.Value }
         }
-        $backupFolder=Join-Path $env:LOCALAPPDATA "vmctl\reports\streaming\$Vm"
+        $backupFolder=Join-Path (Get-VmctlDataRoot) "reports\streaming\$Vm"
         $backupName=if ($Mode.StartsWith('video-')) { 'apollo-video-before.clixml' } else { 'apollo-display-before.clixml' }
         $backup=Join-Path $backupFolder $backupName
         if ($Mode -in @('display-fix','video-test')) {

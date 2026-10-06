@@ -3,6 +3,7 @@
 param([Parameter(Mandatory)][string]$RequestPath, [Parameter(Mandatory)][string]$ResponsePath)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '../src/DataPaths.ps1')
 $ProgressPreference = 'SilentlyContinue'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 
@@ -54,7 +55,7 @@ function Save-ConsoleFrame($Context, $Request) {
     if ($data.Length - $offset -ne $pixelBytes) { throw "Taille inattendue du framebuffer RGB565 : $($data.Length) octets pour $($Context.width)x$($Context.height), attendu $pixelBytes." }
     $frameId = [Guid]::NewGuid().ToString('N')
     $path = if ($Request.outFile) { [IO.Path]::GetFullPath($Request.outFile) } else {
-        Join-Path $env:LOCALAPPDATA "vmctl\captures\$($Context.vm.Name)\$frameId.png" }
+        Join-Path (Get-VmctlDataRoot) "captures\$($Context.vm.Name)\$frameId.png" }
     if ([IO.Path]::GetExtension($path) -ine '.png') { throw 'OutFile exige un fichier .png.' }
     if (Test-Path -LiteralPath $path) { throw 'Le fichier image existe deja. Choisissez un nouveau chemin.' }
     $frameFile = [IO.Path]::ChangeExtension($path, '.json')

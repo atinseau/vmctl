@@ -9,7 +9,8 @@
 | `vmctl.ps1` | Parametres publics, validation et routage des actions. |
 | `install.ps1` | Lanceur global et PATH utilisateur. |
 | `scripts/Invoke-VmctlBootstrap.ps1` | Passage de Windows PowerShell 5.1 au moteur 7, avec arguments types et fichier temporaire protege. |
-| `src/Vmctl.psm1` | Charge les implementations et expose quinze fonctions. |
+| `src/Vmctl.psm1` | Charge les implementations et expose les fonctions publiques. |
+| `src/DataPaths.ps1` | Racine utilisateur partagee et migration des donnees AppData, compatible PowerShell 5.1. |
 | `src/Configuration.ps1` | Configuration, validation des cibles et choix du transport. |
 | `src/Process.ps1` | Processus enfant, stdout/stderr, entree standard et timeout. |
 | `src/Ssh.ps1` | SSH/SCP, commandes Windows/POSIX et diagnostics. |
@@ -43,7 +44,8 @@ Les recettes Apollo passent par le CLI public pour les operations dans la VM. Le
 
 Les droits Hyper-V de l'hote et les droits administrateur de l'invite sont distincts. Une session Windows ouverte dans la VM ne fournit pas ses identifiants a Direct.
 
-Les cibles et comptes Apollo sont dans `%LOCALAPPDATA%\vmctl`. Les caches de mots de passe Windows crees par la recette d'installation sont temporaires. Les donnees GPU et workers proteges sont dans ProgramData/Program Files. Ces fichiers restent hors du depot.
+Les cibles et comptes Apollo sont dans `%USERPROFILE%\.vmctl`. Les caches de mots de passe Windows crees par la recette d'installation sont temporaires. Les donnees GPU et workers proteges sont dans ProgramData/Program Files. Ces fichiers restent hors du depot.
+AppData peut etre virtualise par une application MSIX : des fichiers visibles dans un contexte peuvent manquer dans un autre. Le dossier `.vmctl` du profil utilisateur evite cette separation. La migration conserve configuration, identifiants chiffres, liaisons, rapports, captures et cles ; elle exclut les anciennes sessions temporaires. Moonlight conserve ses propres reglages dans le registre : verifier aussi son profil depuis le terminal de l'utilisateur lors d'un essai reel.
 Les liaisons `streaming-bindings/<alias>.json` associent le GUID Hyper-V au UUID Apollo. Elles restent independantes du repertoire de rapports et permettent un nom Windows different du nom Hyper-V.
 
 `work/` contient telechargements et fixtures ; `bin/` les lanceurs generes. `.gitignore` exclut aussi credentials, certificats, archives et executables. Verifier le contenu avant publication reste necessaire.

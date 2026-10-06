@@ -25,14 +25,14 @@ function Invoke-VmctlConsole {
     if (-not $admin -and -not $Elevate) { throw 'La console Hyper-V exige les droits administrateur. Utilisez un terminal eleve ou ajoutez -Elevate (UAC).' }
     $vmId = if ($Target.ContainsKey('vmId')) { ([Guid]::Parse($Target.vmId)).ToString() } else { '' }
     $taskId = [Guid]::NewGuid().ToString('N')
-    if (-not $OutFile -and $Action -ne 'capabilities') { $OutFile = Join-Path $env:LOCALAPPDATA "vmctl/captures/$Vm/$taskId.png" }
+    if (-not $OutFile -and $Action -ne 'capabilities') { $OutFile = Join-Path (Get-VmctlDataRoot) "captures/$Vm/$taskId.png" }
     if ($OutFile) {
         $OutFile = [IO.Path]::GetFullPath($OutFile)
         if ([IO.Path]::GetExtension($OutFile) -ine '.png') { throw 'OutFile exige un fichier .png.' }
         if ((Test-Path -LiteralPath $OutFile) -or (Test-Path -LiteralPath ([IO.Path]::ChangeExtension($OutFile,'.json')))) { throw 'Le fichier de sortie existe deja. Choisissez un nouveau chemin.' }
     }
     if ($Frame) { $Frame = (Resolve-Path -LiteralPath $Frame -ErrorAction Stop).ProviderPath }
-    $folder = Join-Path $env:LOCALAPPDATA 'vmctl/work'
+    $folder = Join-Path (Get-VmctlDataRoot) 'work'
     $null = New-Item -ItemType Directory -Path $folder -Force
     $requestPath = Join-Path $folder "$taskId.request.json"
     $responsePath = Join-Path $folder "$taskId.response.json"

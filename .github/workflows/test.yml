@@ -23,6 +23,8 @@ jobs:
         run: ./install.ps1
       - name: CLI contracts
         run: ./tests/Test-Vmctl.ps1
+      - name: Shared data and migration
+        run: ./tests/Test-DataPaths.ps1
       - name: PowerShell Direct contracts
         run: ./tests/Test-PowerShellDirect.ps1
       - name: Console guards

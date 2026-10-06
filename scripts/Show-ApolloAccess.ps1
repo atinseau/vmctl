@@ -1,8 +1,9 @@
 #requires -Version 5.1
 param([Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')][string]$Vm)
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot '../src/DataPaths.ps1')
 $env:PSModulePath=Join-Path $PSHOME 'Modules'
-$path=Join-Path $env:LOCALAPPDATA "vmctl\credentials\apollo-$Vm.clixml"
+$path=Join-Path (Get-VmctlDataRoot) "credentials\apollo-$Vm.clixml"
 $credential=Import-Clixml -LiteralPath $path
 Add-Type -AssemblyName System.Windows.Forms
 $form=New-Object Windows.Forms.Form

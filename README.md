@@ -26,7 +26,9 @@ vmctl upload -Vm ma-vm -Credential $cred -Source .\package.zip -Destination C:/T
 vmctl help
 ```
 
-Les cibles sont dans `%LOCALAPPDATA%\vmctl\targets.json`, hors du depot. `-Config PATH` ou `VMCTL_CONFIG` choisit un autre fichier. `targets.example.json` ne contient aucun secret. `register` refuse de remplacer une cible existante.
+Les cibles sont dans `%USERPROFILE%\.vmctl\targets.json`, hors du depot. `-Config PATH` ou `VMCTL_CONFIG` choisit un autre fichier. `targets.example.json` ne contient aucun secret. `register` refuse de remplacer une cible existante.
+
+Les donnees utilisateur sont partagees entre applications et terminaux, hors de la virtualisation AppData des applications MSIX. `install.ps1` migre une ancienne configuration AppData visible depuis son contexte, ses identifiants chiffres et ses liaisons streaming ; les anciennes donnees sont conservees. Relancer l'installateur ne remplace pas une configuration deja migree.
 
 ## Moonlight, Apollo et GPU-P
 
@@ -59,6 +61,7 @@ Windows doit deja etre initialise dans la VM. Cette recette ne cree pas la VM et
 
 ```powershell
 .\tests\Test-Vmctl.ps1
+.\tests\Test-DataPaths.ps1
 .\tests\Test-PowerShellDirect.ps1
 .\tests\Test-ConsoleGuards.ps1
 .\tests\Test-GpuPlanning.ps1

@@ -9,6 +9,7 @@ Depuis la racine, avec PowerShell 7.2+ sur Windows (generer les lanceurs avant l
 ```powershell
 .\install.ps1
 .\tests\Test-Vmctl.ps1
+.\tests\Test-DataPaths.ps1
 .\tests\Test-PowerShellDirect.ps1
 .\tests\Test-ConsoleGuards.ps1
 .\tests\Test-GpuPlanning.ps1
@@ -19,6 +20,7 @@ Depuis la racine, avec PowerShell 7.2+ sur Windows (generer les lanceurs avant l
 | --- | --- |
 | `Test-Vmctl.ps1` | Commandes Windows/POSIX, Unicode, codes de sortie, erreurs, timeouts, arguments et options incompatibles avant mutation. |
 | `Test-PowerShellDirect.ps1` | Transport, planification Direct et compatibilite DPAPI entre PowerShell 7 et 5.1. |
+| `Test-DataPaths.ps1` | Migration sans remplacement, preservation de l'appairage, exclusion des caches expires et racine identique dans PowerShell 5.1 et 7. |
 | `Test-ConsoleGuards.ps1` | Captures, entrees, usage unique des frames et conversion RGB565, sans console VM. |
 | `Test-GpuPlanning.ps1` | Calcul UInt64 des budgets, empreintes et refus de chemins dangereux. |
 | `Test-StreamingSupport.ps1` | Profils par UUID/adresse, conservation de QSettings, expiration avec dates JSON et refus de faux indicateurs de reception video. |
@@ -37,6 +39,8 @@ $cred = Get-Credential -UserName vmctl-admin
 ```
 
 Ce test cree des fichiers temporaires, verifie l'identite, un transfert SHA-256, un script Unicode et les erreurs/codes, puis nettoie ses fichiers. Il n'installe pas Atlas ou Apollo et ne teste pas les jeux.
+
+Pour le CLI global et Moonlight, tester aussi depuis Windows Terminal normal. Un enfant d'une application MSIX peut heriter de sa vue privee d'AppData et du registre ; un test execute uniquement depuis cette application ne prouve pas que la session utilisateur voit la meme configuration ou le meme profil Moonlight.
 
 Les scripts `scripts/Test-*Guest.ps1` s'executent dans l'invite avec `vmctl run`. Lire leurs prerequis avant de les lancer.
 

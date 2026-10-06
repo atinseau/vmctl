@@ -5,7 +5,7 @@ function Invoke-VmctlGpu {
         [switch]$Elevate,[int]$TimeoutSeconds=900)
     if (-not $IsWindows -or $Target.hypervisor -ne 'hyperv' -or $Target.os -ne 'windows') { throw 'GPU automation requires a local Hyper-V Windows target.' }
     $worker=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\Invoke-GpuWorker.ps1'
-    $folder=Join-Path $env:LOCALAPPDATA 'vmctl\work\gpu'
+    $folder=Join-Path (Get-VmctlDataRoot) 'work\gpu'
     $null=New-Item -ItemType Directory -Path $folder -Force
     $response=Join-Path $folder ([guid]::NewGuid().ToString('N')+'.response.json')
     $parameters=@{Mode=$Mode;VmName=[string]$Target.vmName;GpuName=$GpuName;Percent=$Percent;ResponsePath=$response}

@@ -1,9 +1,7 @@
 #requires -Version 7.2
 function Get-VmctlConfigPath {
     if ($env:VMCTL_CONFIG) { return $env:VMCTL_CONFIG }
-    if ($IsWindows) { return Join-Path $env:LOCALAPPDATA 'vmctl/targets.json' }
-    $base = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME '.config' }
-    return Join-Path $base 'vmctl/targets.json'
+    return Join-Path (Get-VmctlDataRoot) 'targets.json'
 }
 
 function Read-VmctlConfig {

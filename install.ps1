@@ -34,7 +34,9 @@ try {
 }
 "@
 [IO.File]::WriteAllText((Join-Path $vmctlBin 'vmctl.ps1'), $vmctlPsLauncher, [Text.UTF8Encoding]::new($false))
-$vmctlConfig = Join-Path $env:LOCALAPPDATA 'vmctl/targets.json'
+. (Join-Path $PSScriptRoot 'src/DataPaths.ps1')
+$vmctlDataRoot = Initialize-VmctlDataRoot -LegacyRoot (Join-Path $env:LOCALAPPDATA 'vmctl')
+$vmctlConfig = Join-Path $vmctlDataRoot 'targets.json'
 if (-not (Test-Path -LiteralPath $vmctlConfig)) {
     $null = New-Item -ItemType Directory -Path (Split-Path $vmctlConfig -Parent) -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'targets.example.json') -Destination $vmctlConfig

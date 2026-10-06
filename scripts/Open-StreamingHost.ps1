@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../src/Vmctl.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../src/StreamingSupport.psm1') -Force
-$bindingPath=Join-Path $env:LOCALAPPDATA "vmctl\streaming-bindings\$Vm.json"
+$bindingPath=Join-Path (Get-VmctlDataRoot) "streaming-bindings\$Vm.json"
 if(-not(Test-Path -LiteralPath $bindingPath)){throw 'No saved streaming binding; run streaming-install first.'}
 $binding=Get-Content -LiteralPath $bindingPath -Raw|ConvertFrom-Json
 if($binding.vmName -ine $VmName -or ($VmId -and $binding.vmId -ine $VmId)){throw 'Saved streaming binding belongs to another VM.'}
@@ -14,7 +14,7 @@ $uuid=[guid]::Parse($binding.serverUuid).ToString()
 $hosts=@(Get-VmctlMoonlightHost -ServerUuid $uuid)
 if($hosts.Count -ne 1){throw 'A unique Moonlight profile is required.'}
 $moonlight=Join-Path $env:ProgramFiles 'Moonlight Game Streaming\Moonlight.exe'
-$reportDirectory=Join-Path $env:LOCALAPPDATA "vmctl\reports\streaming\$Vm"
+$reportDirectory=Join-Path (Get-VmctlDataRoot) "reports\streaming\$Vm"
 $activePath=Join-Path $reportDirectory 'streaming-active.json'
 $null=New-Item -ItemType Directory -Path $reportDirectory -Force
 $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Moonlight Game Streaming Project\Moonlight')

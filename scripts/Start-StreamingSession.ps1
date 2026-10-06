@@ -9,8 +9,8 @@ param(
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../src/Vmctl.psm1') -Force
 $target=Get-VmctlTarget (Read-VmctlConfig $Config) $Vm
-$directory=Join-Path $env:LOCALAPPDATA ('vmctl\work\setup-session-'+[guid]::NewGuid().ToString('N'))
-$sessionRoot=Join-Path $env:LOCALAPPDATA 'vmctl\streaming-sessions'
+$directory=Join-Path (Get-VmctlDataRoot) ('work\setup-session-'+[guid]::NewGuid().ToString('N'))
+$sessionRoot=Join-Path (Get-VmctlDataRoot) 'streaming-sessions'
 $null=New-Item -ItemType Directory -Path $directory,$sessionRoot,$ReportDirectory -Force
 $acl=Get-Acl -LiteralPath $directory
 $acl.SetAccessRuleProtection($true,$false)

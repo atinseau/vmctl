@@ -16,10 +16,10 @@ Import-Module (Join-Path $root 'src\StreamingSupport.psm1') -Force
 if (-not $Config) { $Config=Get-VmctlConfigPath }
 $target=Get-VmctlTarget (Read-VmctlConfig $Config) $Vm
 if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'This recipe requires a registered local Hyper-V Windows VM using PowerShell Direct.' }
-if (-not $ReportDirectory) { $ReportDirectory=Join-Path $env:LOCALAPPDATA "vmctl\reports\streaming\$Vm" }
+if (-not $ReportDirectory) { $ReportDirectory=Join-Path (Get-VmctlDataRoot) "reports\streaming\$Vm" }
 $runtime=Join-Path $PSHOME 'pwsh.exe'
 $winps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$work=Join-Path $env:LOCALAPPDATA ('vmctl\work\streaming-'+[guid]::NewGuid().ToString('N'))
+$work=Join-Path (Get-VmctlDataRoot) ('work\streaming-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path $work,$ReportDirectory -Force
 $statusPath=Join-Path $ReportDirectory 'streaming-status.json'
 $ownedCredential=$false
@@ -144,7 +144,7 @@ try {
     }
     if (-not $address) { throw 'Apollo installed, but no guest IPv4 is reachable from the host on TCP 47989.' }
     Save-State 'pairing' 'Creating the Apollo administrator and pairing Moonlight through the official CLI and vmctl.'
-    $secretDirectory=Join-Path $env:LOCALAPPDATA 'vmctl\credentials'
+    $secretDirectory=Join-Path (Get-VmctlDataRoot) 'credentials'
     $null=New-Item -ItemType Directory -Path $secretDirectory -Force
     $secretPath=Join-Path $secretDirectory ("apollo-$Vm.clixml")
     if (Test-Path -LiteralPath $secretPath) {
@@ -199,7 +199,7 @@ try {
     if ($listResult.ExitCode -ne 0) { throw "Moonlight pairing/app listing failed: $($listResult.Stderr)" }
     $pairedHosts=@(Get-VmctlMoonlightHost -Address $address)
     if($pairedHosts.Count -ne 1){throw 'A unique persisted Moonlight host was not found after pairing.'}
-    $bindingDirectory=Join-Path $env:LOCALAPPDATA 'vmctl\streaming-bindings'
+    $bindingDirectory=Join-Path (Get-VmctlDataRoot) 'streaming-bindings'
     $null=New-Item -ItemType Directory -Path $bindingDirectory -Force
     @{vm=$Vm;vmName=$target.vmName;vmId=$gpuInfo.vmId;serverUuid=$pairedHosts[0].uuid} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bindingDirectory "$Vm.json") -Encoding utf8
     @{vm=$Vm;vmName=$target.vmName;vmId=$gpuInfo.vmId;address=$address;webUi="https://${address}:47990";moonlight=$moonlight;moonlightHostUuid=$pairedHosts[0].uuid;apolloVersion=$packages.apollo.version;moonlightVersion=$packages.moonlight.version;paired=$true;streamTested=$false;gpuAssigned=(@($gpuInfo.assigned).Count -gt 0);apolloGpuConfigured=$gpuConfigured;apolloAdministratorCredentialFile=$secretPath;checkpointsModified=$false} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-install-result.json') -Encoding utf8
