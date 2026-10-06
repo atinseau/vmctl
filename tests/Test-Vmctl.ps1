@@ -104,6 +104,10 @@ Write-Output $x
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'EnableModernCodecs requires') 'Codecs modernes refuses hors test video avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-EnableModernCodecs','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'EnableModernCodecs requires') 'Codecs modernes refuses avec encodeur logiciel avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-status','-Vm','test','-NvencPreset','4','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'NVENC quality options require') 'Preset NVENC refuse hors test video avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-NvencTwoPass','full_res','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'NVENC quality options require') 'Double passe NVENC refusee avec encodeur logiciel avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','nvenc','-PrimaryDisplay','-OnlyDisplay','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'mutually exclusive') 'Ecran principal et ecran seul incompatibles refuses avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','nvenc','-OnlyDisplay','-ConsoleDisplay','-Config',$config)

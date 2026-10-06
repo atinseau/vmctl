@@ -22,6 +22,8 @@ param(
     [string]$GpuName='NVIDIA GeForce RTX 4090', [ValidateRange(1,100)][int]$GpuPercent=25,
     [ValidateSet('software','nvenc')][string]$Encoder,
     [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay, [switch]$PrimaryDisplay, [switch]$DisableRealtimePriority, [switch]$EnableModernCodecs,
+    [ValidateRange(1,7)][int]$NvencPreset,
+    [ValidateSet('disabled','quarter_res','full_res')][string]$NvencTwoPass,
     [int]$X = -1, [int]$Y = -1, [int]$ToX = -1, [int]$ToY = -1,
     [ValidateRange(1, 5)][int]$ButtonIndex = 1,
     [ValidateRange(1, 2)][int]$Count = 1, [int]$Delta,
@@ -74,6 +76,7 @@ vmctl : PowerShell Direct (Hyper-V Windows local), SSH et console optionnelle
   vmctl streaming-display-fix|streaming-display-restore -Vm win-vm
   vmctl streaming-video-test -Vm win-vm -Encoder software|nvenc
   vmctl streaming-video-test -Vm win-vm -Encoder nvenc -EnableModernCodecs
+  vmctl streaming-video-test -Vm win-vm -Encoder nvenc -EnableModernCodecs -NvencPreset 4 -NvencTwoPass full_res
   vmctl streaming-video-test -Vm win-vm -Encoder software -DefaultAdapter -ConsoleDisplay
   vmctl streaming-video-test -Vm win-vm -Encoder nvenc -OnlyDisplay
   vmctl streaming-video-test -Vm win-vm -Encoder nvenc -PrimaryDisplay
@@ -132,6 +135,7 @@ Les autres codes sont ceux du programme distant (ou de scp).
     if ($DisableAutomaticCheckpoints -and $Action -notin @('compact','checkpoint')) { throw '-DisableAutomaticCheckpoints exige compact ou checkpoint.' }
     if ($Encoder -and $Action -ne 'streaming-video-test') { throw '-Encoder is supported only with streaming-video-test.' }
     if ($EnableModernCodecs -and ($Action -ne 'streaming-video-test' -or $Encoder -ne 'nvenc')) { throw '-EnableModernCodecs requires streaming-video-test -Encoder nvenc.' }
+    if (($PSBoundParameters.ContainsKey('NvencPreset') -or $NvencTwoPass) -and ($Action -ne 'streaming-video-test' -or $Encoder -ne 'nvenc')) { throw 'NVENC quality options require streaming-video-test -Encoder nvenc.' }
     if (($DefaultAdapter -or $ConsoleDisplay) -and $Action -ne 'streaming-video-test') { throw '-DefaultAdapter and -ConsoleDisplay require streaming-video-test.' }
     if ($OnlyDisplay -and $Action -ne 'streaming-video-test') { throw '-OnlyDisplay requires streaming-video-test.' }
     if ($PrimaryDisplay -and $Action -ne 'streaming-video-test') { throw '-PrimaryDisplay requires streaming-video-test.' }
@@ -294,6 +298,8 @@ Les autres codes sont ceux du programme distant (ou de scp).
             if ($PrimaryDisplay) { $streamingArgs+='-PrimaryDisplay' }
             if ($DisableRealtimePriority) { $streamingArgs+='-DisableRealtimePriority' }
             if ($EnableModernCodecs) { $streamingArgs+='-EnableModernCodecs' }
+            if ($PSBoundParameters.ContainsKey('NvencPreset')) { $streamingArgs+=@('-NvencPreset',[string]$NvencPreset) }
+            if ($NvencTwoPass) { $streamingArgs+=@('-NvencTwoPass',$NvencTwoPass) }
             $streamingArgs+=@('-Mode',$Action.Substring(10))
             $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $streamingArgs -TimeoutSeconds $TimeoutSeconds
         }

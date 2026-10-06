@@ -8,12 +8,15 @@ param(
     [switch]$Diagnostics,
     [ValidateSet('status','display-fix','display-restore','video-test','video-restore')][string]$Mode='status',
     [ValidateSet('software','nvenc')][string]$Encoder,
-    [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay, [switch]$PrimaryDisplay, [switch]$DisableRealtimePriority, [switch]$EnableModernCodecs
+    [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay, [switch]$PrimaryDisplay, [switch]$DisableRealtimePriority, [switch]$EnableModernCodecs,
+    [ValidateRange(1,7)][int]$NvencPreset,
+    [ValidateSet('disabled','quarter_res','full_res')][string]$NvencTwoPass
 )
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../src/DataPaths.ps1')
 if ($Mode -eq 'video-test' -and -not $Encoder) { throw 'video-test requires an encoder.' }
 if ($EnableModernCodecs -and ($Mode -ne 'video-test' -or $Encoder -ne 'nvenc')) { throw 'EnableModernCodecs requires video-test with nvenc.' }
+if (($PSBoundParameters.ContainsKey('NvencPreset') -or $NvencTwoPass) -and ($Mode -ne 'video-test' -or $Encoder -ne 'nvenc')) { throw 'NVENC quality options require video-test with nvenc.' }
 if ($ConsoleDisplay -and $OnlyDisplay) { throw 'ConsoleDisplay and OnlyDisplay are mutually exclusive.' }
 if ($PrimaryDisplay -and ($ConsoleDisplay -or $OnlyDisplay)) { throw 'PrimaryDisplay, ConsoleDisplay and OnlyDisplay are mutually exclusive.' }
 if ($DisableRealtimePriority -and ($Mode -ne 'video-test' -or $Encoder -ne 'nvenc')) { throw 'DisableRealtimePriority requires video-test with nvenc.' }
@@ -104,7 +107,13 @@ try {
                 $settingsToSave.dd_refresh_rate_option='auto'
                 $settingsToSave.min_log_level='info'
             } else {
+                if ($PSBoundParameters.ContainsKey('NvencPreset') -or $NvencTwoPass) {
+                    $qualityBackup=Join-Path $backupFolder ('apollo-quality-before-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.clixml')
+                    ($settingsToSave | ConvertTo-Json -Depth 10) | ConvertTo-SecureString -AsPlainText -Force | Export-Clixml -LiteralPath $qualityBackup
+                }
                 $settingsToSave.encoder=$Encoder
+                if ($PSBoundParameters.ContainsKey('NvencPreset')) { $settingsToSave.nvenc_preset=[string]$NvencPreset }
+                if ($NvencTwoPass) { $settingsToSave.nvenc_twopass=$NvencTwoPass }
                 $settingsToSave.hevc_mode=if($EnableModernCodecs){'0'}else{'1'}
                 $settingsToSave.av1_mode=if($EnableModernCodecs){'0'}else{'1'}
                 $settingsToSave.min_log_level='debug'
@@ -148,6 +157,8 @@ try {
         if ($Mode -eq 'display-fix' -and ($verified.dd_configuration_option -ne $settingsToSave.dd_configuration_option -or $verified.dd_resolution_option -ne 'auto' -or $verified.dd_refresh_rate_option -ne 'auto')) { throw 'The requested display configuration was not saved.' }
         if ($Mode -eq 'video-test' -and $verified.encoder -ne $Encoder) { throw 'The requested encoder was not saved.' }
         if ($EnableModernCodecs -and ($verified.hevc_mode -ne '0' -or $verified.av1_mode -ne '0')) { throw 'Modern codec detection was not enabled.' }
+        if ($PSBoundParameters.ContainsKey('NvencPreset') -and [int]$verified.nvenc_preset -ne $NvencPreset) { throw 'NVENC preset was not saved.' }
+        if ($NvencTwoPass -and $verified.nvenc_twopass -ne $NvencTwoPass) { throw 'NVENC two-pass mode was not saved.' }
         if ($DisableRealtimePriority -and $verified.nvenc_realtime_hags -ne 'disabled') { throw 'NVENC realtime priority was not disabled.' }
         $response.Dispose(); $response=$null
         $content=[Net.Http.StringContent]::new('{}',[Text.Encoding]::UTF8,'application/json')
@@ -164,6 +175,11 @@ try {
         } until ($ready -or [DateTimeOffset]::UtcNow -ge $deadline)
         if (-not $ready) { throw 'Apollo did not return after restarting.' }
         $configurationResult=@{mode=$Mode;encoder=$verified.encoder;primaryDisplay=$verified.dd_configuration_option;nvencRealtimeHags=$verified.nvenc_realtime_hags;revertOnDisconnect=$verified.dd_config_revert_on_disconnect;encryptedBackup=$backup;apolloRestarted=$true}
+        if ($PSBoundParameters.ContainsKey('NvencPreset') -or $NvencTwoPass) {
+            $configurationResult.nvencPreset=$verified.nvenc_preset
+            $configurationResult.nvencTwoPass=$verified.nvenc_twopass
+            $configurationResult.qualityBackup=$qualityBackup
+        }
     }
     $diagnostic=$null
     if ($Diagnostics) {
@@ -176,7 +192,7 @@ try {
         $lines=@($log -split '\r?\n')
         $safeLines=@($lines | Where-Object { $_ -notmatch 'password|pin=|clientcert|rikey|Authorization|Cookie|^(Red|Green|Blue) Primary|Client dynamicRange' })
         $diagnostic=@{
-            videoSettings=($settings | Select-Object adapter_name,output_name,capture,encoder,headless_mode,nvenc_realtime_hags,nvenc_latency_over_power,dd_configuration_option,dd_resolution_option,dd_refresh_rate_option,hevc_mode,av1_mode,min_log_level,vdisplayStatus)
+            videoSettings=($settings | Select-Object adapter_name,output_name,capture,encoder,headless_mode,nvenc_preset,nvenc_twopass,nvenc_realtime_hags,nvenc_latency_over_power,dd_configuration_option,dd_resolution_option,dd_refresh_rate_option,hevc_mode,av1_mode,min_log_level,vdisplayStatus)
             displayLog=@($safeLines | Where-Object { $_ -match 'Error:|Warning:|CLIENT |Virtual Display|virtual display|Winlogon|SESSION|session|display_device|\bprimary\b|configuration|optimization|Desktop switch|display name|Display:' } | Select-Object -Last 100)
             log=@($safeLines | Where-Object { $_ -match 'Error:|Warning:|Device Description|Feature Level|Capture size|Desktop resolution|Display refresh rate|Requested frame rate|Creating encoder|NvEnc:|CLIENT |Virtual Display|virtual display|desktop switch|Winlogon|SESSION|session' } | Select-Object -Last 90)
             debugLog=@($safeLines | Where-Object { $_ -match 'Debug:' -and $_ -match 'captur|frame|desktop|timeout|DXGI|D3D|duplicat|encode|switch|display|is_user_session_locked' } | Select-Object -Last 80)
