@@ -11,6 +11,27 @@ function Assert-That([bool]$Condition,[string]$Label) {
     $script:passed++; Write-Output "OK: $Label"
 }
 try {
+    $captureLines=@('[2026-10-06 19:00:00.000]: Info: Desktop resolution [1920x1080]', '[2026-10-06 19:01:01.123]: Info: Desktop resolution [2560x1440]')
+    Assert-That ((Get-VmctlCapturedResolution -Lines $captureLines -NotBefore ([datetime]'2026-10-06T19:01:00')) -eq '2560x1440') 'Guest verification reads the capture dimensions after stream startup'
+    Assert-That ((Get-VmctlCapturedResolution -Lines $captureLines -NotBefore ([datetime]'2026-10-06T19:02:00')) -eq '') 'Old capture evidence cannot verify a new stream'
+    Assert-That ((Get-VmctlCapturedResolution -Lines @('Capture size : 2560x1440') -NotBefore ([datetime]'2026-10-06T19:01:00')) -eq '') 'Undated capture dimensions cannot verify a new stream'
+    $windowed=New-VmctlStreamingDisplayPlan -SavedWidth 1920 -SavedHeight 1080 -PrimaryWidth 3840 -PrimaryHeight 2160
+    Assert-That ($windowed.resolution -eq '1920x1080' -and $windowed.displayMode -eq 'windowed') 'Default mode keeps saved windowed resolution'
+    $fullscreen=New-VmctlStreamingDisplayPlan -Mode fullscreen -SavedWidth 1920 -SavedHeight 1080 -PrimaryWidth 3840 -PrimaryHeight 2160
+    Assert-That ($fullscreen.resolution -eq '3840x2160' -and $fullscreen.displayMode -eq 'fullscreen') 'Fullscreen uses native 4K resolution and Moonlight fullscreen display'
+    $ultrawide=New-VmctlStreamingDisplayPlan -Mode fullscreen -PrimaryWidth 3440 -PrimaryHeight 1440
+    Assert-That ($ultrawide.resolution -eq '3440x1440') 'Ultrawide aspect ratio is preserved'
+    $fullInput=New-VmctlStreamingDisplayPlan -Mode fullscreen -PrimaryWidth 2560 -PrimaryHeight 1440 -SavedAbsoluteMouse $true
+    Assert-That (-not $fullInput.absoluteMouse -and $fullInput.captureSystemKeys -eq 'always') 'Fullscreen captures system keys and uses relative mouse regardless of desktop preference'
+    $windowInput=New-VmctlStreamingDisplayPlan -SavedWidth 1920 -SavedHeight 1080 -SavedAbsoluteMouse $true
+    Assert-That ($windowInput.absoluteMouse -and $windowInput.captureSystemKeys -eq 'preferences') 'Window mode retains absolute mouse and configured keyboard capture'
+    $relativeInput=New-VmctlStreamingDisplayPlan -SavedWidth 1920 -SavedHeight 1080 -SavedAbsoluteMouse $false
+    Assert-That (-not $relativeInput.absoluteMouse) 'Window mode also preserves a relative mouse preference'
+    $invalidRejected=$false
+    try { New-VmctlStreamingDisplayPlan -Mode fullscreen -PrimaryWidth 0 -PrimaryHeight 0 | Out-Null } catch {$invalidRejected=$true}
+    Assert-That $invalidRejected 'Missing primary dimensions cannot launch a stream'
+    $primary=Get-VmctlPrimaryMonitor
+    Assert-That ($primary.width -ge 320 -and $primary.height -ge 240) 'Native primary monitor discovery returns physical dimensions'
     $processUuid='f9b3a02d-eb6a-1802-ec96-446211423a0f'
     Assert-That ((Get-VmctlMoonlightProcessRole ('"C:\Program Files\Moonlight Game Streaming\Moonlight.exe" list '+$processUuid) $processUuid) -eq 'helper') 'Moonlight list is a helper, never a stream'
     Assert-That ((Get-VmctlMoonlightProcessRole ('Moonlight.exe quit '+$processUuid) $processUuid) -eq 'helper') 'Moonlight quit is a helper, never a stream'

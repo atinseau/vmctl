@@ -184,7 +184,7 @@ try {
     [pscustomobject]@{
         vm=$Vm;address=$address;webUi=$baseUri;serverCertificateVerified=$true
         serverCertificateSha256=$expectedHash;moonlightHostUuid=$selected.uuid
-        clients=@($result.named_certs | Select-Object name,uuid,perm,connected)
+        clients=@($result.named_certs | Select-Object name,uuid,perm,connected,display_mode)
         diagnostics=$diagnostic
         configuration=$configurationResult
         guestWindowsCredentialRequired=$false;checkedAt=[DateTimeOffset]::UtcNow.ToString('o')

@@ -1,10 +1,11 @@
 #requires -Version 7.2
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)][ValidateSet('help', 'list', 'register', 'exec', 'run', 'upload', 'doctor', 'checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'gpu-setup', 'gpu-status', 'gpu-sync', 'gpu-remove', 'gpu-task-test', 'streaming-install', 'streaming-open', 'streaming-access', 'streaming-forget', 'streaming-status', 'streaming-display-fix', 'streaming-display-restore', 'streaming-video-test', 'streaming-video-restore', 'capabilities', 'screenshot', 'move', 'click', 'type', 'key', 'scroll', 'drag')]
+    [Parameter(Position = 0)][ValidateSet('help', 'list', 'shortcut', 'register', 'exec', 'run', 'upload', 'doctor', 'checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'gpu-setup', 'gpu-status', 'gpu-sync', 'gpu-remove', 'gpu-task-test', 'streaming-install', 'streaming-open', 'streaming-access', 'streaming-forget', 'streaming-status', 'streaming-display-fix', 'streaming-display-restore', 'streaming-video-test', 'streaming-video-restore', 'capabilities', 'screenshot', 'move', 'click', 'type', 'key', 'scroll', 'drag')]
     [string]$Action = 'help',
+    [Parameter(Position=1)][ValidateSet('install','uninstall')][string]$ShortcutAction,
     [string]$Vm, [string]$Command, [string]$File, [string]$Source, [string]$Destination,
-    [string]$Name, [string]$HostName, [string]$UserName,
+    [Alias('-name')][string]$Name, [string]$HostName, [string]$UserName,
     [ValidateSet('windows', 'linux')][string]$Os,
     [ValidateRange(1, 65535)][int]$Port,
     [ValidateSet('none', 'hyperv')][string]$Hypervisor,
@@ -16,6 +17,7 @@ param(
     [string]$Config, [switch]$Recursive, [switch]$Open, [switch]$Reconnect,
     [ValidateSet('Virtual Display','Desktop')][string]$Application = 'Virtual Display',
     [ValidateRange(10,480)][int]$Fps,
+    [Alias('-mode')][ValidateSet('windowed','fullscreen')][string]$Mode = 'windowed',
     [string]$OutFile, [string]$Frame, [string]$Text, [string]$Keys, [string]$ReportDirectory,
     [string]$GpuName='NVIDIA GeForce RTX 4090', [ValidateRange(1,100)][int]$GpuPercent=25,
     [ValidateSet('software','nvenc')][string]$Encoder,
@@ -24,18 +26,34 @@ param(
     [ValidateRange(1, 5)][int]$ButtonIndex = 1,
     [ValidateRange(1, 2)][int]$Count = 1, [int]$Delta,
     [ValidateRange(1, 600)][int]$MaxFrameAgeSeconds = 120,
-    [switch]$Elevate, [switch]$RemoveCheckpoints, [switch]$DisableAutomaticCheckpoints, [switch]$Diagnostics
+    [switch]$Elevate, [switch]$RemoveCheckpoints, [switch]$DisableAutomaticCheckpoints, [switch]$Diagnostics,
+    [Parameter(ValueFromRemainingArguments=$true)][string[]]$ExtraArguments
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 Import-Module (Join-Path $PSScriptRoot 'src/Vmctl.psm1') -Force
 try {
+    # PowerShell treats --name as positional text when invoking a .ps1 directly.
+    # Normalize these GNU-style options for both interactive and native callers.
+    if($ExtraArguments){
+        if($Action -ne 'shortcut'){throw 'Unexpected command arguments.'}
+        for($index=0;$index -lt $ExtraArguments.Count;$index+=2){
+            if($index+1 -ge $ExtraArguments.Count){throw 'Shortcut option requires a value.'}
+            switch($ExtraArguments[$index]){
+                '--name' {if($Name){throw 'Duplicate shortcut name option.'};$Name=$ExtraArguments[$index+1]}
+                '--mode' {if($PSBoundParameters.ContainsKey('Mode')){throw 'Duplicate shortcut mode option.'};$Mode=$ExtraArguments[$index+1];$PSBoundParameters['Mode']=$Mode}
+                default {throw "Unknown shortcut option: $($ExtraArguments[$index])"}
+            }
+        }
+    }
     if ($Action -eq 'help') {
         @'
 vmctl : PowerShell Direct (Hyper-V Windows local), SSH et console optionnelle
 
   vmctl list
+  vmctl shortcut install --name "VM - Fenetre" [--mode windowed|fullscreen]
+  vmctl shortcut uninstall --name "VM - Fenetre"
   vmctl register -Vm win-vm -Os windows -Hypervisor hyperv [-UserName win-vm\vmctl-admin]
   vmctl register -Vm debian -HostName debian-vm -Os linux [-UserName admin]
   vmctl exec -Vm win-vm -Command 'hostname; whoami' [-Credential $cred]
@@ -48,7 +66,7 @@ vmctl : PowerShell Direct (Hyper-V Windows local), SSH et console optionnelle
   vmctl compact -Vm win-vm -TimeoutSeconds 900
   vmctl compact -Vm win-vm -RemoveCheckpoints -TimeoutSeconds 1800
   vmctl streaming-install -Vm win-vm [-Open] [-CredentialFile PATH] [-ReportDirectory PATH]
-  vmctl streaming-open -Vm win-vm [-Reconnect] [-Application 'Virtual Display'|Desktop] [-Fps 60]
+  vmctl streaming-open -Vm win-vm [-Reconnect] [-Application 'Virtual Display'|Desktop] [-Fps 60] [-Mode windowed|fullscreen]
   vmctl streaming-access -Vm win-vm
   vmctl streaming-forget -Vm win-vm [-HostName IPv4]
   vmctl streaming-status -Vm win-vm [-HostName IPv4]
@@ -123,6 +141,16 @@ Les autres codes sont ceux du programme distant (ou de scp).
     if ($Reconnect -and $Action -ne 'streaming-open') { throw '-Reconnect is supported only with streaming-open.' }
     if ($PSBoundParameters.ContainsKey('Application') -and $Action -ne 'streaming-open') { throw '-Application is supported only with streaming-open.' }
     if ($PSBoundParameters.ContainsKey('Fps') -and $Action -ne 'streaming-open') { throw '-Fps is supported only with streaming-open.' }
+    if ($PSBoundParameters.ContainsKey('Mode') -and $Action -notin @('streaming-open','shortcut')) { throw '-Mode is supported only with streaming-open or shortcut.' }
+    if ($ShortcutAction -and $Action -ne 'shortcut') { throw 'install/uninstall requires shortcut.' }
+    if ($Action -eq 'shortcut') {
+        if(-not $ShortcutAction -or -not $Name){throw 'Usage: vmctl shortcut install|uninstall --name NAME [--mode windowed|fullscreen]'}
+        Import-Module (Join-Path $PSScriptRoot 'src/ShortcutSupport.psm1') -Force
+        $shortcutArgs=@{Action=$ShortcutAction;Name=$Name;Mode=$Mode;Runtime=(Join-Path $PSHOME 'pwsh.exe');PickerScript=(Join-Path $PSScriptRoot 'scripts/Open-StreamingPicker.ps1')}
+        if($PSBoundParameters.ContainsKey('Config')){$shortcutArgs.Config=[IO.Path]::GetFullPath($Config)}
+        Set-VmctlDesktopShortcut @shortcutArgs | ConvertTo-Json
+        exit 0
+    }
     if ($Action -eq 'register') {
         if (-not $Vm -or $Vm -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]*$') { throw 'register exige un -Vm valide.' }
         if (-not $Os) { throw 'register exige -Os.' }
@@ -234,11 +262,12 @@ Les autres codes sont ceux du programme distant (ou de scp).
     switch ($Action) {
         'streaming-open' {
             if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'streaming-open requires a local Hyper-V Windows target.' }
-            $openArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'scripts\Open-StreamingHost.ps1'),'-Vm',$Vm,'-VmName',$target.vmName,'-Application',$Application)
+            $openArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'scripts\Open-StreamingHost.ps1'),'-Vm',$Vm,'-VmName',$target.vmName,'-Application',$Application,'-Mode',$Mode)
             if($target.ContainsKey('vmId')){$openArgs+=@('-VmId',$target.vmId)}
             if($Reconnect){$openArgs+='-Reconnect'}
             if($PSBoundParameters.ContainsKey('Fps')){$openArgs+=@('-Fps',[string]$Fps)}
-            $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $openArgs -TimeoutSeconds $TimeoutSeconds
+            $openTimeout=if($PSBoundParameters.ContainsKey('TimeoutSeconds')){$TimeoutSeconds}else{300}
+            $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $openArgs -TimeoutSeconds $openTimeout
         }
         'streaming-forget' {
             if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'streaming-forget requires a local Hyper-V Windows target.' }

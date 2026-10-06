@@ -40,6 +40,10 @@ vmctl streaming-install -Vm ma-vm -Open
 vmctl streaming-status -Vm ma-vm -Diagnostics
 # Connexions suivantes, sans mot de passe Windows ni UAC :
 vmctl streaming-open -Vm ma-vm
+vmctl streaming-open -Vm ma-vm -Mode fullscreen -Reconnect
+vmctl shortcut install --name "VM - Fenetre" --mode windowed
+vmctl shortcut install --name "VM - Plein ecran" --mode fullscreen
+vmctl shortcut uninstall --name "VM - Fenetre"
 ```
 
 La recette reutilise Moonlight, installe Apollo, prepare le rendu GPU-P NVIDIA, redemarre la VM si necessaire et effectue l'appairage automatiquement. `-Open` ouvre Virtual Display avec les preferences Moonlight conservees. La reception video est verifiee dans le journal client ; la fluidite et le son exigent un essai reel. Le service demarre avec Windows et la synchronisation des pilotes GPU-P est planifiee sur l'hote. Les budgets GPU-P ne garantissent pas un pourcentage identique de performances de jeu.
@@ -50,6 +54,7 @@ Windows doit deja etre initialise dans la VM. Cette recette ne cree pas la VM et
 
 - [Commandes, transports, configuration et console](docs/usage.md)
 - [Moonlight/Apollo, GPU-P et ecrans noirs](docs/streaming.md)
+- [Raccourcis du bureau et choix de VM](docs/shortcuts.md)
 - [Audit du setup et nettoyage complet](docs/streaming-audit.md)
 - [Disques, compaction et checkpoints](docs/storage.md)
 - [Architecture du code et ajout d'une commande](docs/architecture.md)
@@ -66,6 +71,7 @@ Windows doit deja etre initialise dans la VM. Cette recette ne cree pas la VM et
 .\tests\Test-ConsoleGuards.ps1
 .\tests\Test-GpuPlanning.ps1
 .\tests\Test-StreamingSupport.ps1
+.\tests\Test-Shortcuts.ps1
 ```
 
 Ces tests n'utilisent aucune VM. Les essais reels sont explicites et documentes separement. Les configurations locales, identifiants, installateurs, captures et rapports ne doivent pas etre publies.

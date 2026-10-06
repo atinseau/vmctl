@@ -90,4 +90,69 @@ function Test-VmctlStreamingSessionFreshness {
     # string can swap the month and day (for example 06/10 in French).
     $Now -lt [DateTimeOffset]$Expires
 }
-Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Get-VmctlMoonlightProcessRole,Test-VmctlStreamingSessionFreshness
+function Get-VmctlCapturedResolution {
+    param([string[]]$Lines,[datetime]$NotBefore)
+    $latest=''
+    foreach($line in $Lines){
+        $match=[regex]::Match($line,'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)\].*Desktop resolution \[(\d+x\d+)\]')
+        if($match.Success -and [datetime]::ParseExact($match.Groups[1].Value,'yyyy-MM-dd HH:mm:ss.fff',[Globalization.CultureInfo]::InvariantCulture) -ge $NotBefore){$latest=$match.Groups[2].Value}
+    }
+    $latest
+}
+function Initialize-VmctlPrimaryMonitorApi {
+    if ('VmctlPrimaryMonitor' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class VmctlPrimaryMonitor {
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left,Top,Right,Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct Point { public int X,Y; }
+    [StructLayout(LayoutKind.Sequential)] struct MonitorInfo { public int Size; public Rect Monitor,Work; public uint Flags; }
+    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(Point point,uint flags);
+    [DllImport("user32.dll",SetLastError=true)] static extern bool GetMonitorInfo(IntPtr monitor,ref MonitorInfo info);
+    [DllImport("user32.dll",SetLastError=true)] static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int w,int h,uint flags);
+    public static Rect Bounds() {
+        // Windows places the primary monitor at (0,0). Per-monitor DPI awareness
+        // avoids mistaking logical pixels (for example 2560) for native 4K pixels.
+        IntPtr previous=SetThreadDpiAwarenessContext(new IntPtr(-4));
+        if(previous==IntPtr.Zero) throw new Win32Exception();
+        try {
+            MonitorInfo info=new MonitorInfo(); info.Size=Marshal.SizeOf(info);
+            if(!GetMonitorInfo(MonitorFromPoint(new Point(),1),ref info)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return info.Monitor;
+        } finally { SetThreadDpiAwarenessContext(previous); }
+    }
+    public static void Place(IntPtr window) {
+        Rect bounds=Bounds();
+        IntPtr previous=SetThreadDpiAwarenessContext(new IntPtr(-4));
+        if(previous==IntPtr.Zero) throw new Win32Exception();
+        try {
+            // A normal, non-topmost borderless window keeps host Alt+Tab usable.
+            if(!SetWindowPos(window,IntPtr.Zero,bounds.Left,bounds.Top,bounds.Right-bounds.Left,bounds.Bottom-bounds.Top,0x214))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+        } finally { SetThreadDpiAwarenessContext(previous); }
+    }
+}
+'@
+}
+function Get-VmctlPrimaryMonitor {
+    Initialize-VmctlPrimaryMonitorApi
+    $bounds=[VmctlPrimaryMonitor]::Bounds()
+    [pscustomobject]@{width=$bounds.Right-$bounds.Left;height=$bounds.Bottom-$bounds.Top}
+}
+function Set-VmctlStreamOnPrimaryMonitor {
+    param([Parameter(Mandatory)][IntPtr]$WindowHandle)
+    Initialize-VmctlPrimaryMonitorApi
+    [VmctlPrimaryMonitor]::Place($WindowHandle)
+}
+function New-VmctlStreamingDisplayPlan {
+    param([ValidateSet('windowed','fullscreen')][string]$Mode='windowed',
+        [int]$SavedWidth,[int]$SavedHeight,[int]$PrimaryWidth,[int]$PrimaryHeight,[bool]$SavedAbsoluteMouse)
+    $width=if($Mode -eq 'fullscreen'){$PrimaryWidth}else{$SavedWidth}
+    $height=if($Mode -eq 'fullscreen'){$PrimaryHeight}else{$SavedHeight}
+    if($width -lt 320 -or $width -gt 16384 -or $height -lt 240 -or $height -gt 16384){throw 'Streaming dimensions are invalid.'}
+    [pscustomobject]@{mode=$Mode;width=$width;height=$height;resolution="${width}x${height}";displayMode=$(if($Mode -eq 'fullscreen'){'fullscreen'}else{'windowed'});absoluteMouse=($Mode -ne 'fullscreen' -and $SavedAbsoluteMouse);captureSystemKeys=$(if($Mode -eq 'fullscreen'){'always'}else{'preferences'})}
+}
+Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Get-VmctlMoonlightProcessRole,Test-VmctlStreamingSessionFreshness,Get-VmctlPrimaryMonitor,Set-VmctlStreamOnPrimaryMonitor,New-VmctlStreamingDisplayPlan,Get-VmctlCapturedResolution
