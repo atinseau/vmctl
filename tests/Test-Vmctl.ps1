@@ -123,9 +123,28 @@ Write-Output $x
             $quotedCode = '$literal = ''élève "quotes" & | $variable''; Write-Output $literal'
             $launcher = Join-Path $root 'bin/vmctl.ps1'
             if (Test-Path -LiteralPath $launcher) {
-                $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$launcher,'exec','-Vm','test',
-                    '-Config',$config,'-Command',$quotedCode)
-                Assert-That ($result.ExitCode -eq 0 -and $result.Stdout.TrimEnd() -eq $quotedCode) 'Lanceur global : arguments complexes transmis intacts'
+                foreach ($launcherRuntime in @($runtime, (Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'))) {
+                    $label = [IO.Path]::GetFileName($launcherRuntime)
+                    $result = Invoke-VmctlProcess $launcherRuntime @('-NoProfile','-File',$launcher,'exec','-Vm','test',
+                        '-Config',$config,'-Command',$quotedCode)
+                    Assert-That ($result.ExitCode -eq 0 -and $result.Stdout.TrimEnd() -eq $quotedCode -and -not $result.Stderr) "Lanceur global : arguments complexes transmis intacts ($label)"
+                    $literalLauncher = $launcher.Replace("'", "''")
+                    $literalConfig = $config.Replace("'", "''")
+                    $program = "`$code = ('# commentaire ' * 6000) + 'eleve'; & '$literalLauncher' exec -Vm test -Config '$literalConfig' -Command `$code -Open:`$false; exit `$LASTEXITCODE"
+                    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($program))
+                    $result = Invoke-VmctlProcess $launcherRuntime @('-NoProfile','-EncodedCommand',$encoded)
+                    Assert-That ($result.ExitCode -eq 0 -and $result.Stdout.TrimEnd() -eq (('# commentaire ' * 6000) + 'eleve')) "Lanceur global : commande longue et commutateur false preserves ($label)"
+                    $program = "`$secret = [Security.SecureString]::new(); 'fixture-only-password'.ToCharArray() | ForEach-Object { `$secret.AppendChar(`$_) }; `$cred = [pscredential]::new('fixture-user', `$secret); & '$literalLauncher' exec -Vm test -Config '$literalConfig' -Command 'unused' -Credential `$cred; exit `$LASTEXITCODE"
+                    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($program))
+                    $result = Invoke-VmctlProcess $launcherRuntime @('-NoProfile','-EncodedCommand',$encoded)
+                    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'reserves a PowerShell Direct' -and $result.Stderr -notmatch 'fixture-only-password') "Lanceur global : PSCredential transmis comme objet et garde transport conservee ($label)"
+                    $env:VMCTL_TEST_EXITCODE = '255'
+                    $env:VMCTL_TEST_STDERR = 'Permission denied (publickey).'
+                    $result = Invoke-VmctlProcess $launcherRuntime @('-NoProfile','-File',$launcher,'doctor','-Vm','test','-Config',$config)
+                    Assert-That ($result.ExitCode -eq 255 -and $result.Stderr -match 'Authentification refusee') "Lanceur global : code de sortie et stderr preserves ($label)"
+                    $env:VMCTL_TEST_EXITCODE = '0'
+                    $env:VMCTL_TEST_STDERR = ''
+                }
             }
             $uploadSource = Join-Path $scratch 'fichier avec espaces.txt'
             'fixture' | Set-Content -LiteralPath $uploadSource -Encoding utf8

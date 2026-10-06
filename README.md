@@ -8,6 +8,8 @@ Un CLI PowerShell pour executer des commandes dans une VM, transferer des fichie
 
 Prerequis : PowerShell 7.2+ sur l'hote. Pour Direct : Hyper-V et Windows PowerShell 5.1 sur Windows, une VM Windows demarree et un compte avec un vrai mot de passe. Le PIN Windows Hello ne remplace pas ce mot de passe.
 
+Executer `install.ps1` depuis PowerShell 7. Ensuite, la commande globale `vmctl` fonctionne aussi depuis Windows PowerShell 5.1 : le lanceur demarre automatiquement le moteur PowerShell 7 installe, sans alias ni configuration de profil.
+
 ```powershell
 .\install.ps1
 vmctl register -Vm ma-vm -Os windows -Hypervisor hyperv -UserName vmctl-admin

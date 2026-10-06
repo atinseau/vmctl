@@ -8,6 +8,7 @@
 | --- | --- |
 | `vmctl.ps1` | Parametres publics, validation et routage des actions. |
 | `install.ps1` | Lanceur global et PATH utilisateur. |
+| `scripts/Invoke-VmctlBootstrap.ps1` | Passage de Windows PowerShell 5.1 au moteur 7, avec arguments types et fichier temporaire protege. |
 | `src/Vmctl.psm1` | Charge les implementations et expose quinze fonctions. |
 | `src/Configuration.ps1` | Configuration, validation des cibles et choix du transport. |
 | `src/Process.ps1` | Processus enfant, stdout/stderr, entree standard et timeout. |
@@ -25,6 +26,8 @@
 | `docs/` | Guides par workflow. |
 
 Les fichiers `src/*.ps1` sont charges par dot-sourcing dans le meme module et ne sont pas des commandes autonomes. Les workers gardent leur processus et leur version PowerShell propres.
+
+Le lanceur global accepte Windows PowerShell 5.1 et appelle directement le CLI depuis PowerShell 7.2+. Depuis 5.1, il utilise le chemin absolu du moteur memorise a l'installation. Les arguments passent par CLIXML dans un dossier temporaire accessible uniquement a l'utilisateur et SYSTEM ; les identifiants sont chiffres par DPAPI. Le fichier est supprime en fin d'appel. Ce passage conserve les commutateurs explicites, Unicode et codes de sortie sans interpreter les arguments dans cmd.exe.
 
 ## Parcours d'une commande
 

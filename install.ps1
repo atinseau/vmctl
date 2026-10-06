@@ -16,8 +16,23 @@ $vmctlTokens = $null
 $vmctlAst = [Management.Automation.Language.Parser]::ParseFile($vmctlScript, [ref]$vmctlTokens, [ref]$vmctlParseErrors)
 if ($vmctlParseErrors) { throw 'Le script vmctl contient une erreur de syntaxe.' }
 $vmctlLiteralScript = $vmctlScript.Replace("'", "''")
-$vmctlPsLauncher = '#requires -Version 7.2' + "`n" + $vmctlAst.ParamBlock.Extent.Text + "`n" +
-    "& '$vmctlLiteralScript' @PSBoundParameters`nexit `$LASTEXITCODE`n"
+$vmctlLiteralRuntime = $vmctlRuntime.Replace("'", "''")
+$vmctlLiteralBootstrap = (Join-Path $PSScriptRoot 'scripts/Invoke-VmctlBootstrap.ps1').Replace("'", "''")
+$vmctlPsLauncher = '#requires -Version 5.1' + "`n" + $vmctlAst.ParamBlock.Extent.Text + "`n" + @"
+`$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new(`$false)
+try {
+    if (`$PSVersionTable.PSVersion -lt [version]'7.2') {
+        & '$vmctlLiteralBootstrap' -Runtime '$vmctlLiteralRuntime' -Script '$vmctlLiteralScript' -Parameters `$PSBoundParameters
+    } else {
+        & '$vmctlLiteralScript' @PSBoundParameters
+    }
+    exit `$LASTEXITCODE
+} catch {
+    [Console]::Error.WriteLine(`$_.ToString())
+    exit 1
+}
+"@
 [IO.File]::WriteAllText((Join-Path $vmctlBin 'vmctl.ps1'), $vmctlPsLauncher, [Text.UTF8Encoding]::new($false))
 $vmctlConfig = Join-Path $env:LOCALAPPDATA 'vmctl/targets.json'
 if (-not (Test-Path -LiteralPath $vmctlConfig)) {
