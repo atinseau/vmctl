@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "win-vm": {
+      "os": "windows",
+      "hypervisor": "hyperv",
+      "vmName": "win-vm",
+      "transport": "psdirect"
+    }
+  }
+}

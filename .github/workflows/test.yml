@@ -1,0 +1,31 @@
+name: Tests PowerShell
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-tests:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install local launcher
+        run: ./install.ps1
+      - name: CLI contracts
+        run: ./tests/Test-Vmctl.ps1
+      - name: PowerShell Direct contracts
+        run: ./tests/Test-PowerShellDirect.ps1
+      - name: Console guards
+        run: ./tests/Test-ConsoleGuards.ps1
+      - name: GPU planning
+        run: ./tests/Test-GpuPlanning.ps1

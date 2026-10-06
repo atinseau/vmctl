@@ -1,0 +1,22 @@
+bin/
+work/
+*.tmp
+
+# Local VM configuration, credentials and runtime reports.
+/targets.json
+/reports/
+/captures/
+*.clixml
+*.pfx
+*.p12
+*.pem
+*.key
+*.log
+.env
+.env.*
+
+# Downloaded installers, generated packages and test binaries.
+*.exe
+*.dll
+*.zip
+*.7z

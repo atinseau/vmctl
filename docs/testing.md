@@ -1,0 +1,40 @@
+# Verification
+
+[Accueil](../README.md) · [Architecture](architecture.md)
+
+## Tests locaux sans VM
+
+Depuis la racine, avec PowerShell 7.2+ sur Windows :
+
+```powershell
+.\tests\Test-Vmctl.ps1
+.\tests\Test-PowerShellDirect.ps1
+.\tests\Test-ConsoleGuards.ps1
+.\tests\Test-GpuPlanning.ps1
+```
+
+| Script | Verification |
+| --- | --- |
+| `Test-Vmctl.ps1` | Commandes Windows/POSIX, Unicode, codes de sortie, erreurs, timeouts, arguments et options incompatibles avant mutation. |
+| `Test-PowerShellDirect.ps1` | Transport, planification Direct et compatibilite DPAPI entre PowerShell 7 et 5.1. |
+| `Test-ConsoleGuards.ps1` | Captures, entrees, usage unique des frames et conversion RGB565, sans console VM. |
+| `Test-GpuPlanning.ps1` | Calcul UInt64 des budgets, empreintes et refus de chemins dangereux. |
+
+Les fixtures restent dans `work/`, ignore par Git. Certains essais de compilateur ou de shell POSIX sont ignores si ces outils sont indisponibles ; le resultat le signale. Un test local reussi ne confirme pas un streaming dans une VM.
+
+## Test explicite sur une vraie VM
+
+VM enregistree et demarree, avec les droits Hyper-V sur l'hote :
+
+```powershell
+$cred = Get-Credential -UserName vmctl-admin
+.\tests\Test-RealVm.ps1 -Vm ma-vm -Credential $cred
+```
+
+Ce test cree des fichiers temporaires, verifie l'identite, un transfert SHA-256, un script Unicode et les erreurs/codes, puis nettoie ses fichiers. Il n'installe pas Atlas ou Apollo et ne teste pas les jeux.
+
+Les scripts `scripts/Test-*Guest.ps1` s'executent dans l'invite avec `vmctl run`. Lire leurs prerequis avant de les lancer.
+
+## Avant publication
+
+Executer les tests locaux apres modification du routage ou des modules. Verifier `git diff --cached` et `git status --ignored` : seuls sources, exemples sans secrets, documentation et tests doivent etre suivis. Ne pas publier configurations locales, identifiants, rapports ou caches d'installation.
