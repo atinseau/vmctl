@@ -68,6 +68,23 @@ Les rapports indiquent l'adresse de l'interface `https://<IP>:47990`. Le certifi
 
 Validation reelle du 5 octobre 2026 : Moonlight 6.2.0, Apollo 0.4.6, ApolloService Running/Auto, SudoVDA OK, appairage et liste des trois applications verifies dans win-vm. Un vrai flux Virtual Display H.264 1280x720 a ete recu et decode sans GPU physique attribue. Ce test ne valide ni le son, ni les performances de jeu, ni la persistance apres redemarrage.
 
+## Nettoyer Apollo et le profil Moonlight
+
+Fermer Moonlight sur l'hote. Depuis le terminal hote administrateur, utiliser le meme compte invite pendant toute l'operation :
+
+```powershell
+$cred = Get-Credential -UserName vmctl-admin
+vmctl run -Vm ma-vm -Credential $cred -File .\scripts\Uninstall-ApolloGuest.ps1
+vmctl restart -Vm ma-vm
+vmctl streaming-forget -Vm ma-vm
+```
+
+Le worker de nettoyage complet retire aussi SudoVDA et ViGEm : verifier avant de le lancer que ces composants ne sont pas partages avec d'autres applications dans la VM. Il restaure le reglage de rendu cree par vmctl, retire les fichiers/configurations Apollo et ses entrees PATH. Il laisse Atlas et GPU-P en place. Le redemarrage libere les pilotes retires.
+
+`streaming-forget` s'execute sur l'hote sans UAC ni mot de passe invite. Il efface uniquement le profil et le compte API Apollo de cette cible. La liaison UUID est prioritaire ; pour une installation ancienne sans liaison et plusieurs noms identiques, `-HostName IPv4` selectionne le profil par son adresse connue. L'identite du client Moonlight, les autres machines et les preferences sont conservees. Ouvrir Moonlight pendant cette mutation est refuse pour eviter de reecrire un ancien cache.
+
+Le setup ferme maintenant un Moonlight inactif avant appairage et le rouvre ensuite ; deconnecter un flux actif avant de lancer la recette. [Audit et limites du setup automatique](streaming-audit.md).
+
 ## Automatisation GPU-P NVIDIA
 
 Pour une nouvelle VM Windows deja enregistree, utiliser un terminal administrateur : gpu-setup puis streaming-install. La premiere commande ne demande pas de mot de passe invite ; la seconde utilise une seule identification Windows pour installer, configurer et appairer Apollo. Si streaming-install a ete execute avant gpu-setup, le relancer ensuite configure NVENC sans refaire les installations deja presentes.
@@ -98,7 +115,7 @@ vmctl gpu-remove -Vm win-vm -Elevate
 
 gpu-remove retire l'adaptateur et la tache, puis restaure les reglages MMIO, memoire et demarrage sauvegardes. Les fichiers NVIDIA copies dans Windows sont conserves pour ne pas supprimer des DLL qui pourraient etre utilisees par un autre pilote ; les checkpoints ne sont pas touches. gpu-task-test lance la tache deja enregistree et attend son code de sortie ; une VM arretee sera demarree par cette verification. gpu-setup valide aussi ce chemin SYSTEM lorsqu'il doit relancer une VM qui tournait avant la configuration. Les erreurs et le dernier rapport sont dans `%ProgramData%\vmctl\gpu\<GUID>`.
 
-Validation locale : Test-GpuPlanning.ps1 verifie 17 cas de calcul UInt64, detection des changements et refus de chemins dangereux ; Test-Vmctl.ps1 verifie 43 cas dont les gardes avant mutation. Sur win-vm, la RTX 4090 est detectee sans erreur, nvEncodeAPI64.dll correspond au pilote hote, Apollo cree h264_nvenc sur ce GPU et Moonlight recoit un flux H.264 1920x1080. Le redemarrage via vmctl et le lancement par la tache SYSTEM ont reussi, sans recopier les pilotes inchanges. Le 6 octobre, le diagnostic a corrige l'image noire : GpuVirtualizationFlags=0 dans l'invite puis ecran virtuel seul (ensure_only_display) dans Apollo. L'utilisateur a confirme le bureau visible et fluide en NVENC 1080p60. Un nouveau flux demande 1080p120 avec souris absolue ; ce n'est pas une mesure de performances de jeu. Ces essais ne mesurent pas les performances de jeu ; le son et CUDA ne sont pas valides. Un redemarrage complet de l'hote et une vraie mise a jour de pilote NVIDIA ne sont pas impliques par ces tests.
+Validation locale : Test-GpuPlanning.ps1 verifie 17 cas de calcul UInt64, detection des changements et refus de chemins dangereux ; Test-Vmctl.ps1 verifie 44 cas dont les gardes avant mutation. Sur win-vm, la RTX 4090 est detectee sans erreur, nvEncodeAPI64.dll correspond au pilote hote, Apollo cree h264_nvenc sur ce GPU et Moonlight recoit un flux H.264 1920x1080. Le redemarrage via vmctl et le lancement par la tache SYSTEM ont reussi, sans recopier les pilotes inchanges. Le 6 octobre, le diagnostic a corrige l'image noire : GpuVirtualizationFlags=0 dans l'invite puis ecran virtuel seul (ensure_only_display) dans Apollo. L'utilisateur a confirme le bureau visible et fluide en NVENC 1080p60. Un nouveau flux demande 1080p120 avec souris absolue ; ce n'est pas une mesure de performances de jeu. Ces essais ne mesurent pas les performances de jeu ; le son et CUDA ne sont pas valides. Un redemarrage complet de l'hote et une vraie mise a jour de pilote NVIDIA ne sont pas impliques par ces tests.
 
 ## Recherches GPU-P pour Hyper-V
 

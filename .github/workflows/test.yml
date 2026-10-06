@@ -29,3 +29,5 @@ jobs:
         run: ./tests/Test-ConsoleGuards.ps1
       - name: GPU planning
         run: ./tests/Test-GpuPlanning.ps1
+      - name: Moonlight host isolation
+        run: ./tests/Test-StreamingSupport.ps1

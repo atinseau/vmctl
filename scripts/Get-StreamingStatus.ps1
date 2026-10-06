@@ -3,6 +3,7 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')][string]$Vm,
     [Parameter(Mandatory)][string]$VmName,
+    [string]$VmId,
     [string]$HostName,
     [switch]$Diagnostics,
     [ValidateSet('status','display-fix','display-restore','video-test','video-restore')][string]$Mode='status',
@@ -15,8 +16,15 @@ if ($ConsoleDisplay -and $OnlyDisplay) { throw 'ConsoleDisplay and OnlyDisplay a
 $credentialPath=Join-Path $env:LOCALAPPDATA "vmctl\credentials\apollo-$Vm.clixml"
 if (-not(Test-Path -LiteralPath $credentialPath)) { throw 'The saved Apollo administrator credential is missing.' }
 $registry='HKCU:\Software\Moonlight Game Streaming Project\Moonlight\hosts'
+$bindingPath=Join-Path $env:LOCALAPPDATA "vmctl\streaming-bindings\$Vm.json"
+$serverUuid=''
+if(Test-Path -LiteralPath $bindingPath) {
+    $binding=Get-Content -LiteralPath $bindingPath -Raw|ConvertFrom-Json
+    if($binding.vmName -ine $VmName -or ($VmId -and $binding.vmId -ine $VmId)){throw 'Saved Apollo binding does not match the configured Hyper-V VM.'}
+    $serverUuid=[guid]::Parse($binding.serverUuid).ToString()
+}
 $hosts=@(Get-ChildItem -LiteralPath $registry -ErrorAction Stop | ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath } | Where-Object {
-    $_.hostname -ieq $VmName -and (-not $HostName -or $HostName -in @($_.localaddress,$_.manualaddress,$_.remoteaddress))
+    (($serverUuid -and $_.uuid -ieq $serverUuid) -or (-not $serverUuid -and $_.hostname -ieq $VmName)) -and (-not $HostName -or $HostName -in @($_.localaddress,$_.manualaddress,$_.remoteaddress))
 })
 if ($hosts.Count -ne 1 -or -not $hosts[0].srvcert) { throw 'Select a unique paired Moonlight host with its stored server certificate.' }
 $selected=$hosts[0]

@@ -16,6 +16,7 @@
 | `src/HyperV.ps1` | Demarrage/arret, checkpoints et disques. |
 | `src/Console.ps1` | Delegation des captures et entrees Hyper-V. |
 | `src/Gpu.ps1`, `src/GpuSupport.psm1` | Worker GPU, quotas et validation des chemins. |
+| `src/StreamingSupport.psm1` | Identification des profils Moonlight et suppression ciblee des tableaux QSettings. |
 | `scripts/` | Workers Windows, installateurs et recettes. |
 | `tests/` | Tests locaux et test explicite sur une vraie VM. |
 | `docs/` | Guides par workflow. |
@@ -37,6 +38,7 @@ Les recettes Apollo passent par le CLI public pour les operations dans la VM. Le
 Les droits Hyper-V de l'hote et les droits administrateur de l'invite sont distincts. Une session Windows ouverte dans la VM ne fournit pas ses identifiants a Direct.
 
 Les cibles et comptes Apollo sont dans `%LOCALAPPDATA%\vmctl`. Les caches de mots de passe Windows crees par la recette d'installation sont temporaires. Les donnees GPU et workers proteges sont dans ProgramData/Program Files. Ces fichiers restent hors du depot.
+Les liaisons `streaming-bindings/<alias>.json` associent le GUID Hyper-V au UUID Apollo. Elles restent independantes du repertoire de rapports et permettent un nom Windows different du nom Hyper-V.
 
 `work/` contient telechargements et fixtures ; `bin/` les lanceurs generes. `.gitignore` exclut aussi credentials, certificats, archives et executables. Verifier le contenu avant publication reste necessaire.
 

@@ -66,6 +66,8 @@ Write-Output $x
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'GPU automation requires') 'Configuration GPU refusee sur cible non Hyper-V avant toute mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-status','-Vm','test','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-status requires') 'Diagnostic Apollo refuse sur cible SSH avant lecture des identifiants ou appel reseau'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-forget','-Vm','test','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-forget requires') 'Suppression de profil refusee sur cible SSH avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-status requires') 'Changement encodeur refuse sur cible SSH avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-Diagnostics','-Config',$config)

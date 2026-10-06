@@ -44,6 +44,7 @@ Windows doit deja etre initialise dans la VM. Cette recette ne cree pas la VM et
 
 - [Commandes, transports, configuration et console](docs/usage.md)
 - [Moonlight/Apollo, GPU-P et ecrans noirs](docs/streaming.md)
+- [Audit du setup et nettoyage complet](docs/streaming-audit.md)
 - [Disques, compaction et checkpoints](docs/storage.md)
 - [Architecture du code et ajout d'une commande](docs/architecture.md)
 - [Tests locaux et essais sur une vraie VM](docs/testing.md)
@@ -57,6 +58,7 @@ Windows doit deja etre initialise dans la VM. Cette recette ne cree pas la VM et
 .\tests\Test-PowerShellDirect.ps1
 .\tests\Test-ConsoleGuards.ps1
 .\tests\Test-GpuPlanning.ps1
+.\tests\Test-StreamingSupport.ps1
 ```
 
 Ces tests n'utilisent aucune VM. Les essais reels sont explicites et documentes separement. Les configurations locales, identifiants, installateurs, captures et rapports ne doivent pas etre publies.

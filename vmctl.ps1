@@ -1,7 +1,7 @@
 #requires -Version 7.2
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)][ValidateSet('help', 'list', 'register', 'exec', 'run', 'upload', 'doctor', 'checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'gpu-setup', 'gpu-status', 'gpu-sync', 'gpu-remove', 'gpu-task-test', 'streaming-install', 'streaming-access', 'streaming-status', 'streaming-display-fix', 'streaming-display-restore', 'streaming-video-test', 'streaming-video-restore', 'capabilities', 'screenshot', 'move', 'click', 'type', 'key', 'scroll', 'drag')]
+    [Parameter(Position = 0)][ValidateSet('help', 'list', 'register', 'exec', 'run', 'upload', 'doctor', 'checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'gpu-setup', 'gpu-status', 'gpu-sync', 'gpu-remove', 'gpu-task-test', 'streaming-install', 'streaming-access', 'streaming-forget', 'streaming-status', 'streaming-display-fix', 'streaming-display-restore', 'streaming-video-test', 'streaming-video-restore', 'capabilities', 'screenshot', 'move', 'click', 'type', 'key', 'scroll', 'drag')]
     [string]$Action = 'help',
     [string]$Vm, [string]$Command, [string]$File, [string]$Source, [string]$Destination,
     [string]$Name, [string]$HostName, [string]$UserName,
@@ -47,6 +47,7 @@ vmctl : PowerShell Direct (Hyper-V Windows local), SSH et console optionnelle
   vmctl compact -Vm win-vm -RemoveCheckpoints -TimeoutSeconds 1800
   vmctl streaming-install -Vm win-vm [-CredentialFile PATH] [-ReportDirectory PATH]
   vmctl streaming-access -Vm win-vm
+  vmctl streaming-forget -Vm win-vm [-HostName IPv4]
   vmctl streaming-status -Vm win-vm [-HostName IPv4]
   vmctl streaming-status -Vm win-vm -Diagnostics
   vmctl streaming-display-fix|streaming-display-restore -Vm win-vm
@@ -180,12 +181,20 @@ Les autres codes sont ceux du programme distant (ou de scp).
         exit 0
     }
     switch ($Action) {
+        'streaming-forget' {
+            if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'streaming-forget requires a local Hyper-V Windows target.' }
+            $forgetArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'scripts\Remove-StreamingHost.ps1'),'-Vm',$Vm,'-VmName',$target.vmName)
+            if($target.ContainsKey('vmId')){$forgetArgs+=@('-VmId',$target.vmId)}
+            if($HostName){$forgetArgs+=@('-HostName',$HostName)}
+            $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $forgetArgs -TimeoutSeconds $TimeoutSeconds
+        }
         { $_ -in @('streaming-status','streaming-display-fix','streaming-display-restore','streaming-video-test','streaming-video-restore') } {
             if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'streaming-status requires a local Hyper-V Windows target.' }
             if ($Diagnostics -and $Action -ne 'streaming-status') { throw '-Diagnostics is supported only with streaming-status.' }
             if ($Action -eq 'streaming-video-test' -and -not $Encoder) { throw 'streaming-video-test requires -Encoder software or nvenc.' }
             if ($Encoder -and $Action -ne 'streaming-video-test') { throw '-Encoder is supported only with streaming-video-test.' }
             $streamingArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'scripts\Get-StreamingStatus.ps1'),'-Vm',$Vm,'-VmName',$target.vmName)
+            if($target.ContainsKey('vmId')){$streamingArgs+=@('-VmId',$target.vmId)}
             if ($HostName) { $streamingArgs+=@('-HostName',$HostName) }
             if ($Diagnostics) { $streamingArgs+='-Diagnostics' }
             if ($Encoder) { $streamingArgs+=@('-Encoder',$Encoder) }

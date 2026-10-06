@@ -11,6 +11,7 @@ param(
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $root 'src\Vmctl.psm1') -Force
+Import-Module (Join-Path $root 'src\StreamingSupport.psm1') -Force
 if (-not $Config) { $Config=Get-VmctlConfigPath }
 $target=Get-VmctlTarget (Read-VmctlConfig $Config) $Vm
 if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'This recipe requires a registered local Hyper-V Windows VM using PowerShell Direct.' }
@@ -21,6 +22,7 @@ $work=Join-Path $env:LOCALAPPDATA ('vmctl\work\streaming-'+[guid]::NewGuid().ToS
 $null=New-Item -ItemType Directory -Path $work,$ReportDirectory -Force
 $statusPath=Join-Path $ReportDirectory 'streaming-status.json'
 $ownedCredential=$false
+$reopenMoonlight=$false
 function Save-State([string]$State,[string]$Message) {
     @{vm=$Vm;state=$State;message=$Message;pid=$PID;at=[DateTimeOffset]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath $statusPath -Encoding utf8
 }
@@ -50,6 +52,16 @@ function Invoke-GuestApi([hashtable]$ApiRequest) {
     } finally { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }
 }
 try {
+    # Independent QSettings instances can overwrite each other's pairing cache.
+    $clients=@(Get-Process Moonlight -ErrorAction SilentlyContinue)
+    if(@($clients|Where-Object {$_.MainWindowTitle -and $_.MainWindowTitle -ne 'Moonlight'}).Count) { throw 'Disconnect the active Moonlight stream before configuring another VM.' }
+    if($clients.Count) {
+        $reopenMoonlight=$true
+        foreach($client in $clients){$null=$client.CloseMainWindow()}
+        $deadline=(Get-Date).AddSeconds(10)
+        do { Start-Sleep -Milliseconds 250; $clients=@(Get-Process Moonlight -ErrorAction SilentlyContinue) } while($clients.Count -and (Get-Date) -lt $deadline)
+        if($clients.Count){throw 'Close all Moonlight processes before installation; its saved hosts cannot be updated safely.'}
+    }
     Save-State 'host-preparation' 'Installing Moonlight and checking Hyper-V GPU capabilities.'
     $packages=@{moonlight=(Get-Package 'moonlight-stream/moonlight-qt' 'v6.2.0' 'MoonlightSetup-6.2.0.exe');apollo=(Get-Package 'ClassicOldSong/Apollo' 'v0.4.6' 'Apollo-0.4.6.exe')}
     $packages | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-packages.json') -Encoding utf8
@@ -66,7 +78,7 @@ try {
     $gpuResult.Stdout | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-gpu-host.json') -Encoding utf8
     if (-not $UserName) {
         if ($target.ContainsKey('user')) { $UserName=$target.user }
-        if (-not $UserName) { $UserName="$Vm\vmctl-admin" }
+        if (-not $UserName) { $UserName='vmctl-admin' }
     }
     if (-not $CredentialFile) {
         $CredentialFile=Join-Path $work 'guest-credential.clixml'
@@ -130,17 +142,38 @@ try {
             $apiRequest.action='pair'; $apiRequest.pin=$pin; $apiRequest.clientName=$env:COMPUTERNAME
             $pairResult=Invoke-GuestApi $apiRequest
             $pairResult | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-pairing.json') -Encoding utf8
-            Start-Sleep -Seconds 3
+            # CLI pairing opens a completion dialog instead of exiting. Its certificate
+            # must reach QSettings before closing that process or launching another CLI.
+            $deadline=(Get-Date).AddSeconds(15)
+            $certificateSaved=$false
+            do {
+                $savedHosts=@(Get-VmctlMoonlightHost -Address $address)
+                if($savedHosts.Count -eq 1) {
+                    $savedKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Moonlight Game Streaming Project\Moonlight\hosts\'+$savedHosts[0].key)
+                    try {$certificateSaved=[bool]$savedKey.GetValue('srvcert','')} finally {$savedKey.Dispose()}
+                }
+                if(-not $certificateSaved){Start-Sleep -Milliseconds 250}
+            } while(-not $certificateSaved -and -not $pairProcess.HasExited -and (Get-Date) -lt $deadline)
+            if(-not $certificateSaved){throw 'Moonlight did not persist its paired server certificate.'}
+            if(-not $pairProcess.HasExited){$null=$pairProcess.CloseMainWindow(); $null=$pairProcess.WaitForExit(5000)}
         } finally { if (-not $pairProcess.HasExited) { $pairProcess.Kill() }; $pairProcess.Dispose() }
         $listResult=Invoke-VmctlProcess $moonlight @('list',$address) -TimeoutSeconds 45
     }
     $listResult | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-moonlight-apps.json') -Encoding utf8
     if ($listResult.ExitCode -ne 0) { throw "Moonlight pairing/app listing failed: $($listResult.Stderr)" }
-    @{vm=$Vm;address=$address;webUi="https://${address}:47990";moonlight=$moonlight;apolloVersion=$packages.apollo.version;moonlightVersion=$packages.moonlight.version;paired=$true;streamTested=$false;gpuAssigned=(@($gpuInfo.assigned).Count -gt 0);apolloGpuConfigured=$gpuConfigured;apolloAdministratorCredentialFile=$secretPath;checkpointsModified=$false} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-install-result.json') -Encoding utf8
+    $pairedHosts=@(Get-VmctlMoonlightHost -Address $address)
+    if($pairedHosts.Count -ne 1){throw 'A unique persisted Moonlight host was not found after pairing.'}
+    $bindingDirectory=Join-Path $env:LOCALAPPDATA 'vmctl\streaming-bindings'
+    $null=New-Item -ItemType Directory -Path $bindingDirectory -Force
+    @{vm=$Vm;vmName=$target.vmName;vmId=$gpuInfo.vmId;serverUuid=$pairedHosts[0].uuid} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bindingDirectory "$Vm.json") -Encoding utf8
+    @{vm=$Vm;vmName=$target.vmName;vmId=$gpuInfo.vmId;address=$address;webUi="https://${address}:47990";moonlight=$moonlight;moonlightHostUuid=$pairedHosts[0].uuid;apolloVersion=$packages.apollo.version;moonlightVersion=$packages.moonlight.version;paired=$true;streamTested=$false;gpuAssigned=(@($gpuInfo.assigned).Count -gt 0);apolloGpuConfigured=$gpuConfigured;apolloAdministratorCredentialFile=$secretPath;checkpointsModified=$false} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-install-result.json') -Encoding utf8
     Save-State 'installed-and-paired' 'Moonlight and Apollo installed, paired, and app listing verified. GPU acceleration and a video stream remain to be tested.'
 } catch {
     Save-State 'failed' $_.Exception.Message
     throw
 } finally {
     if ($ownedCredential -and (Test-Path -LiteralPath $CredentialFile)) { Remove-Item -LiteralPath $CredentialFile -Force }
+    if($reopenMoonlight -and -not(Get-Process Moonlight -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Moonlight Game Streaming\Moonlight.exe'))) {
+        $null=Start-Process -FilePath (Join-Path $env:ProgramFiles 'Moonlight Game Streaming\Moonlight.exe') -WorkingDirectory (Join-Path $env:ProgramFiles 'Moonlight Game Streaming')
+    }
 }
