@@ -34,6 +34,7 @@ try {
     $fps=if($PSBoundParameters.ContainsKey('Fps')){$Fps}elseif($binding.PSObject.Properties.Name -contains 'fps'){[int]$binding.fps}else{[int]$key.GetValue('fps',60)}
     $width=[int]$key.GetValue('width',1920);$height=[int]$key.GetValue('height',1080)
     $absolute=[bool]$key.GetValue('mouseacceleration',0)
+    $manualBitrate=if([string]$key.GetValue('autoadjustbitrate','true') -in @('false','0')){[int]$key.GetValue('bitrate',20000)}else{0}
 } finally {$key.Dispose()}
 $primary=if($Mode -eq 'fullscreen'){Get-VmctlPrimaryMonitor}else{$null}
 $displayArgs=@{Mode=$Mode;SavedWidth=$width;SavedHeight=$height;SavedAbsoluteMouse=$absolute}
@@ -120,7 +121,9 @@ if(-not $alreadyOpen) {
     # its own TEMP log. Inherited pipes can otherwise leave the caller stuck.
     $mouseOption=if($absolute){'--absolute-mouse'}else{'--no-absolute-mouse'}
     $displayOption=if($Mode -eq 'fullscreen'){'--capture-system-keys always'}else{''}
-    $arguments="stream $uuid `"$Application`" --resolution ${width}x${height} --fps $fps --video-codec H.264 $mouseOption --display-mode $($display.displayMode) $displayOption"
+    $bitrateOption=if($manualBitrate -ge 500 -and $manualBitrate -le 500000){"--bitrate $manualBitrate"}else{''}
+    # Let Moonlight use the user's codec and bitrate preferences, including AV1.
+    $arguments="stream $uuid `"$Application`" --resolution ${width}x${height} --fps $fps $bitrateOption $mouseOption --display-mode $($display.displayMode) $displayOption"
     $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         $newPid=& (Join-Path $PSScriptRoot 'Start-InteractiveProcess.ps1') -Executable $moonlight -Arguments $arguments -WorkingDirectory (Split-Path $moonlight)

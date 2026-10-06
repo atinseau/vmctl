@@ -100,6 +100,10 @@ Write-Output $x
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'DisableRealtimePriority requires') 'Priorite NVENC refusee hors test video avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-DisableRealtimePriority','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'DisableRealtimePriority requires') 'Priorite NVENC refusee avec encodeur logiciel avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-status','-Vm','test','-EnableModernCodecs','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'EnableModernCodecs requires') 'Codecs modernes refuses hors test video avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-EnableModernCodecs','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'EnableModernCodecs requires') 'Codecs modernes refuses avec encodeur logiciel avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','nvenc','-PrimaryDisplay','-OnlyDisplay','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'mutually exclusive') 'Ecran principal et ecran seul incompatibles refuses avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','nvenc','-OnlyDisplay','-ConsoleDisplay','-Config',$config)

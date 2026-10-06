@@ -8,11 +8,12 @@ param(
     [switch]$Diagnostics,
     [ValidateSet('status','display-fix','display-restore','video-test','video-restore')][string]$Mode='status',
     [ValidateSet('software','nvenc')][string]$Encoder,
-    [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay, [switch]$PrimaryDisplay, [switch]$DisableRealtimePriority
+    [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay, [switch]$PrimaryDisplay, [switch]$DisableRealtimePriority, [switch]$EnableModernCodecs
 )
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../src/DataPaths.ps1')
 if ($Mode -eq 'video-test' -and -not $Encoder) { throw 'video-test requires an encoder.' }
+if ($EnableModernCodecs -and ($Mode -ne 'video-test' -or $Encoder -ne 'nvenc')) { throw 'EnableModernCodecs requires video-test with nvenc.' }
 if ($ConsoleDisplay -and $OnlyDisplay) { throw 'ConsoleDisplay and OnlyDisplay are mutually exclusive.' }
 if ($PrimaryDisplay -and ($ConsoleDisplay -or $OnlyDisplay)) { throw 'PrimaryDisplay, ConsoleDisplay and OnlyDisplay are mutually exclusive.' }
 if ($DisableRealtimePriority -and ($Mode -ne 'video-test' -or $Encoder -ne 'nvenc')) { throw 'DisableRealtimePriority requires video-test with nvenc.' }
@@ -104,8 +105,8 @@ try {
                 $settingsToSave.min_log_level='info'
             } else {
                 $settingsToSave.encoder=$Encoder
-                $settingsToSave.hevc_mode='1'
-                $settingsToSave.av1_mode='1'
+                $settingsToSave.hevc_mode=if($EnableModernCodecs){'0'}else{'1'}
+                $settingsToSave.av1_mode=if($EnableModernCodecs){'0'}else{'1'}
                 $settingsToSave.min_log_level='debug'
                 if ($DisableRealtimePriority) { $settingsToSave.nvenc_realtime_hags='disabled' }
                 if ($DefaultAdapter) { $settingsToSave.adapter_name='' }
@@ -146,6 +147,7 @@ try {
         $verified=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
         if ($Mode -eq 'display-fix' -and ($verified.dd_configuration_option -ne $settingsToSave.dd_configuration_option -or $verified.dd_resolution_option -ne 'auto' -or $verified.dd_refresh_rate_option -ne 'auto')) { throw 'The requested display configuration was not saved.' }
         if ($Mode -eq 'video-test' -and $verified.encoder -ne $Encoder) { throw 'The requested encoder was not saved.' }
+        if ($EnableModernCodecs -and ($verified.hevc_mode -ne '0' -or $verified.av1_mode -ne '0')) { throw 'Modern codec detection was not enabled.' }
         if ($DisableRealtimePriority -and $verified.nvenc_realtime_hags -ne 'disabled') { throw 'NVENC realtime priority was not disabled.' }
         $response.Dispose(); $response=$null
         $content=[Net.Http.StringContent]::new('{}',[Text.Encoding]::UTF8,'application/json')
