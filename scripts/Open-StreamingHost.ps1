@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')][string]$Vm,
     [Parameter(Mandatory)][string]$VmName,[string]$VmId,[switch]$Reconnect,
-    [ValidateSet('Virtual Display','Desktop')][string]$Application='Virtual Display'
+    [ValidateSet('Virtual Display','Desktop')][string]$Application='Virtual Display',
+    [ValidateRange(10,480)][int]$Fps
 )
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../src/Vmctl.psm1') -Force
@@ -24,7 +25,7 @@ $changingApplication=($saved -and $previousApplication -ne $Application)
 if($changingApplication -and -not $Reconnect){throw 'Changing the streaming application requires -Reconnect.'}
 $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Moonlight Game Streaming Project\Moonlight')
 try {
-    $fps=[int]$key.GetValue('fps',60)
+    $fps=if($PSBoundParameters.ContainsKey('Fps')){$Fps}elseif($binding.PSObject.Properties.Name -contains 'fps'){[int]$binding.fps}else{[int]$key.GetValue('fps',60)}
     $width=[int]$key.GetValue('width',1920);$height=[int]$key.GetValue('height',1080)
     $absolute=[bool]$key.GetValue('mouseacceleration',0)
 } finally {$key.Dispose()}
@@ -37,6 +38,8 @@ if($processes.Count) {
     $savedMatches=($saved -and $saved.serverUuid -ieq $uuid -and $saved.pid -eq $process.Id -and $saved.startTicks -eq $process.StartTime.ToUniversalTime().Ticks)
     $commandLine=(Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)").CommandLine
     if(-not $savedMatches -and (-not $commandLine -or $commandLine -notmatch ([regex]::Escape($uuid)))){throw 'The open Moonlight process cannot be identified as this VM; close it first.'}
+    if($PSBoundParameters.ContainsKey('Fps') -and -not $Reconnect -and (-not $savedMatches -or [int]$saved.fps -ne $fps)){throw 'Changing the frame rate of an open stream requires -Reconnect.'}
+    if($savedMatches -and -not $Reconnect){$fps=[int]$saved.fps}
     if($savedMatches){$logPath=[string]$saved.logPath}
     else {
         $legacy=@(Get-ChildItem -LiteralPath $reportDirectory -Filter '*.stderr.log' -File|Where-Object {$_.CreationTimeUtc -ge $process.StartTime.ToUniversalTime().AddSeconds(-1)}|Sort-Object CreationTimeUtc)
@@ -73,8 +76,10 @@ if(-not $alreadyOpen) {
     }
 }
 $record=@{vm=$Vm;serverUuid=$uuid;application=$Application;pid=$process.Id;startTicks=$process.StartTime.ToUniversalTime().Ticks;resolution="${width}x${height}";fps=$fps;absoluteMouse=$absolute;logPath=$logPath}
+$record.imageVerified=$false
 $record|ConvertTo-Json|Set-Content -LiteralPath $activePath
 $deadline=(Get-Date).AddSeconds(30)
+$receivingSince=$null
 do {
     $process.Refresh()
     if($process.HasExited){throw "Moonlight exited while opening the stream; see $logPath"}
@@ -84,11 +89,29 @@ do {
     }
     $log=if($logPath -and (Test-Path -LiteralPath $logPath)){Get-Content -LiteralPath $logPath -Raw}else{''}
     $evidence=Get-VmctlStreamEvidence -WindowTitle $process.MainWindowTitle -HostName $hosts[0].hostname -Log $log
-    if($process.MainWindowHandle -ne 0 -and $evidence.ready){break}
+    if($evidence.disconnected){
+        $record.logPath=$logPath;$record.streamWindowOpen=$false;$record.videoDeliveryVerified=$false
+        $record.streamState='disconnected';$record.failure=$evidence.failure
+        $record|ConvertTo-Json|Set-Content -LiteralPath $activePath
+        throw "Moonlight disconnected during startup: $($evidence.failure); see $logPath"
+    }
+    if($process.MainWindowHandle -ne 0 -and $evidence.ready){
+        if($null -eq $receivingSince){$receivingSince=Get-Date}
+        # First packets preceded a disconnect by three seconds in the failing
+        # login capture. Observe startup before reporting video reception.
+        if(((Get-Date)-$receivingSince).TotalSeconds -ge 8){break}
+    }else{$receivingSince=$null}
     Start-Sleep -Milliseconds 250
 } while((Get-Date) -lt $deadline)
-if($process.MainWindowHandle -eq 0 -or -not $evidence.ready){throw "The matching Moonlight window is not receiving video yet; see $logPath"}
+if($process.MainWindowHandle -eq 0 -or -not $evidence.ready -or $null -eq $receivingSince -or ((Get-Date)-$receivingSince).TotalSeconds -lt 8){throw "The matching Moonlight window is not receiving video yet; see $logPath"}
 $record.logPath=$logPath;$record.windowTitle=$process.MainWindowTitle;$record.windowHandle=$process.MainWindowHandle.ToInt64()
 $record.streamWindowOpen=$true;$record.videoDeliveryVerified=$true;$record.alreadyOpen=$alreadyOpen
+$record.streamState='receiving';$record.startupObservationSeconds=8
+if($PSBoundParameters.ContainsKey('Fps')){
+    # Store this VM's cadence after successful startup; other Moonlight hosts
+    # and global preferences keep their existing settings.
+    $binding|Add-Member -NotePropertyName fps -NotePropertyValue $fps -Force
+    $binding|ConvertTo-Json|Set-Content -LiteralPath $bindingPath -Encoding utf8
+}
 $record|ConvertTo-Json|Set-Content -LiteralPath $activePath
 $record|ConvertTo-Json

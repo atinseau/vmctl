@@ -15,6 +15,7 @@ param(
     [ValidateRange(1, 86400)][int]$TimeoutSeconds = 120,
     [string]$Config, [switch]$Recursive, [switch]$Open, [switch]$Reconnect,
     [ValidateSet('Virtual Display','Desktop')][string]$Application = 'Virtual Display',
+    [ValidateRange(10,480)][int]$Fps,
     [string]$OutFile, [string]$Frame, [string]$Text, [string]$Keys, [string]$ReportDirectory,
     [string]$GpuName='NVIDIA GeForce RTX 4090', [ValidateRange(1,100)][int]$GpuPercent=25,
     [ValidateSet('software','nvenc')][string]$Encoder,
@@ -47,7 +48,7 @@ vmctl : PowerShell Direct (Hyper-V Windows local), SSH et console optionnelle
   vmctl compact -Vm win-vm -TimeoutSeconds 900
   vmctl compact -Vm win-vm -RemoveCheckpoints -TimeoutSeconds 1800
   vmctl streaming-install -Vm win-vm [-Open] [-CredentialFile PATH] [-ReportDirectory PATH]
-  vmctl streaming-open -Vm win-vm [-Reconnect] [-Application 'Virtual Display'|Desktop]
+  vmctl streaming-open -Vm win-vm [-Reconnect] [-Application 'Virtual Display'|Desktop] [-Fps 60]
   vmctl streaming-access -Vm win-vm
   vmctl streaming-forget -Vm win-vm [-HostName IPv4]
   vmctl streaming-status -Vm win-vm [-HostName IPv4]
@@ -121,6 +122,7 @@ Les autres codes sont ceux du programme distant (ou de scp).
     if ($Open -and $Action -ne 'streaming-install') { throw '-Open is supported only with streaming-install.' }
     if ($Reconnect -and $Action -ne 'streaming-open') { throw '-Reconnect is supported only with streaming-open.' }
     if ($PSBoundParameters.ContainsKey('Application') -and $Action -ne 'streaming-open') { throw '-Application is supported only with streaming-open.' }
+    if ($PSBoundParameters.ContainsKey('Fps') -and $Action -ne 'streaming-open') { throw '-Fps is supported only with streaming-open.' }
     if ($Action -eq 'register') {
         if (-not $Vm -or $Vm -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]*$') { throw 'register exige un -Vm valide.' }
         if (-not $Os) { throw 'register exige -Os.' }
@@ -235,6 +237,7 @@ Les autres codes sont ceux du programme distant (ou de scp).
             $openArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'scripts\Open-StreamingHost.ps1'),'-Vm',$Vm,'-VmName',$target.vmName,'-Application',$Application)
             if($target.ContainsKey('vmId')){$openArgs+=@('-VmId',$target.vmId)}
             if($Reconnect){$openArgs+='-Reconnect'}
+            if($PSBoundParameters.ContainsKey('Fps')){$openArgs+=@('-Fps',[string]$Fps)}
             $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $openArgs -TimeoutSeconds $TimeoutSeconds
         }
         'streaming-forget' {

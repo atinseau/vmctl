@@ -76,6 +76,8 @@ Write-Output $x
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'Reconnect is supported only') 'Option reconnexion reservee a ouverture streaming avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'gpu-setup','-Vm','test','-Application','Desktop','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'Application is supported only') 'Application Moonlight refusee hors ouverture streaming avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'gpu-setup','-Vm','test','-Fps','60','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'Fps is supported only') 'FPS refuses hors ouverture streaming avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-open','-Vm','test','-Application','Desktop','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-open requires') 'Application Desktop refusee sur cible SSH avant tout lancement'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-Config',$config)

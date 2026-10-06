@@ -17,6 +17,12 @@ try {
     Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' 'Test decode successful').ready) 'Decoder self-test does not prove reception'
     Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' 'FFmpeg-based video decoder chosen').ready) 'Configured decoder without packets is not ready'
     Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' 'Received first video packet after 300 ms').ready) 'Packets without a chosen decoder are not ready'
+    $lostLog=$realLog+"`nControl stream received unexpected disconnect event`nConnection terminated: -1`nQuit event received"
+    $lost=Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' $lostLog
+    Assert-That (-not $lost.ready -and $lost.disconnected -and $lost.failure -match 'Connection terminated: -1') 'Disconnect after first packets is rejected with its error code'
+    Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' ($realLog+"`nQuit event received")).ready) 'A closed stream is not ready even if the GUI still exists'
+    Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' ($realLog+"`nStarting video stream...")).ready) 'Old packets cannot validate a new stream attempt'
+    Assert-That (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' ($lostLog+"`nStarting video stream...`n"+$realLog)).ready 'A new receiving attempt can recover from an earlier disconnect'
     $now=[DateTimeOffset]'2026-10-06T09:00:00Z'
     $parsed='{ "expires": "2026-10-06T10:00:00Z" }'|ConvertFrom-Json
     Assert-That (Test-VmctlStreamingSessionFreshness -Expires $parsed.expires -Now $now) 'JSON dates retain October instead of becoming June'

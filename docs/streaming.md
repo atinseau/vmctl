@@ -24,11 +24,15 @@ Pour ouvrir ensuite la VM depuis un terminal normal :
 vmctl streaming-open -Vm win-vm
 # Fermer proprement le flux de cette VM puis le rouvrir :
 vmctl streaming-open -Vm win-vm -Reconnect
+# Cadence conservee pour cette VM par vmctl, sans changer Moonlight globalement :
+vmctl streaming-open -Vm win-vm -Reconnect -Fps 60
 ```
 
 `streaming-open` utilise le UUID Apollo conserve, verifie la liste d'applications et ouvre Virtual Display. Resolution, FPS et souris absolue suivent les preferences Moonlight existantes ; le flux utilise H.264 dans une fenetre. Une session deja ouverte et identifiee est reutilisee ; une autre session est refusee. Le setup eleve lance le client avec le jeton de la session Windows normale. La reconnexion ne demande ni UAC ni mot de passe Windows. Son journal reste dans le dossier TEMP Moonlight.
 
 Avec `-Open`, le resultat final est `stream-window-open`. La fenetre doit porter le nom de cette VM et le journal doit montrer un decodeur choisi puis la reception du premier paquet video. Un simple processus Moonlight ou son test interne de decodeur ne suffit pas. Cela ne prouve ni la cadence reelle ni la qualite de l'image ou du son.
+
+Le controle d'ouverture observe maintenant huit secondes de reception initiale et refuse les deconnexions presentes dans le dernier essai du journal, meme si le processus GUI reste ouvert. Le rapport contient `streamState` et `imageVerified=false` : aucune analyse des pixels n'est realisee. Une deconnexion ulterieure reste possible ; ce controle n'est pas une surveillance permanente. Apres ouverture reussie, `-Fps` conserve la cadence dans la liaison de cette VM (`streaming-bindings/<Vm>.json`), qui devient prioritaire sur les preferences Moonlight globales. Modifier la cadence d'un flux deja ouvert exige `-Reconnect`. Les autres machines gardent leurs preferences.
 
 Validation du 6 octobre : reinstallation apres nettoyage, preparation du rendu et redemarrage automatiques, nouveau pairing, ouverture NVENC 1080p120/souris absolue puis reconnexion en environ sept secondes depuis un terminal normal. Les caches Windows des essais ont ete supprimes et les sessions elevees terminees. Des erreurs de verification et de reprise ont ete corrigees pendant cet essai ; ce n'est pas une validation d'une nouvelle VM de zero ni de toutes les configurations GPU.
 
@@ -79,6 +83,10 @@ vmctl streaming-status -Vm win-vm -Diagnostics
 Dernier essai du 6 octobre : `ensure_only_display` produisait encore une capture noire en boucle. `ensure_primary` a donne une image visible et fluide en NVENC 1080p120, confirmee par l'utilisateur, mais le PC hote a ensuite subi un arret brutal. Kernel-Power 41 avait un code bugcheck nul ; aucun ecran bleu exploitable n'est etabli. Les rapports de crash etaient desactives sur l'hote (`CrashDumpEnabled=0`, `LogEvent=0`) et LiveKernelReports n'etait pas accessible depuis la session normale. Le pilote hote est NVIDIA 617.14. Un [autre signalement GPU-P/NVENC](https://github.com/LizardByte/Sunshine/issues/4750) concerne un pilote 551.78 corrige par 591.59 ; il ne suffit pas a expliquer cet arret avec 617.14.
 
 Apres redemarrage, `nvenc_realtime_hags=disabled` et `ensure_primary` ont ete appliques et relus via vmctl, le certificat du serveur a ete verifie et Apollo a redemarre. Aucun nouveau flux n'a ete ouvert pour valider cette precaution sous charge. La cause du crash et la stabilite apres correction restent a confirmer ; les essais historiques ci-dessous ne constituent pas cette validation. Pour le prochain essai surveille, sauvegarder le travail de l'hote et commencer a 60 FPS dans Moonlight avant de retester 120 FPS.
+
+Essai suivant : a 120 FPS, Moonlight a affiche `Connection terminated: -1` apres les premiers paquets ; Apollo enregistrait une session verrouillee et `Failed to get new pointer shape [0x887A0026]`. [Microsoft identifie ce dernier code comme DXGI_ERROR_ACCESS_LOST](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/dxgi-error), une interface de duplication du bureau devenue invalide. Apollo restait joignable et le PC hote n'avait pas redemarre. Le profil Desktop/logiciel a permis de recuperer l'acces, puis un nouvel essai NVENC/ensure_primary a 60 FPS a montre l'ecran de connexion, confirme par l'utilisateur. La capture a cesse de se recreer apres ses premieres secondes et les statistiques d'encodage ont continue plus d'une minute. La stabilite a 120 FPS et la cause de l'arret precedent de l'hote ne sont toujours pas etablies.
+
+L'utilisateur a ensuite confirme le bureau visible et fluide dans ce meme flux NVENC a 60 FPS. Cette cadence est conservee pour win-vm par le CLI. Il s'agit d'un essai court ; les verrouillages/reconnexions repetes et la stabilite prolongée restent a verifier.
 
 `videoDeliveryVerified` confirme l'arrivee de paquets video et le decodeur, pas le contenu des pixels. Le 6 octobre, un Windows verrouille produisait un flux noir avec une boucle de recreation de la capture GPU. Verifier l'image et surveiller les journaux Apollo apres plusieurs reconnexions, en session ouverte puis verrouillee, avant de valider un setup.
 

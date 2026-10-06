@@ -65,9 +65,16 @@ function Remove-VmctlMoonlightHost {
 function Get-VmctlStreamEvidence {
     param([string]$WindowTitle,[string]$HostName,[string]$Log)
     $windowMatches=($WindowTitle -ieq ($HostName+' - Moonlight'))
-    $videoReceived=($Log -match 'Received first video packet after \d+ ms')
-    $decoderChosen=($Log -match 'video decoder chosen')
-    [pscustomobject]@{windowMatches=$windowMatches;videoReceived=$videoReceived;decoderChosen=$decoderChosen;ready=($windowMatches -and $videoReceived -and $decoderChosen)}
+    # A GUI process can return to its launcher after losing a stream, and the
+    # same log can contain several attempts. Inspect only the latest attempt.
+    $streamStart=$Log.LastIndexOf('Starting video stream...',[StringComparison]::Ordinal)
+    $currentLog=if($streamStart -ge 0){$Log.Substring($streamStart)}else{$Log}
+    $videoReceived=($currentLog -match 'Received first video packet after \d+ ms')
+    $decoderChosen=($currentLog -match 'video decoder chosen')
+    $failures=[regex]::Matches($currentLog,'(?m)^.*(?:Connection terminated:\s*(-?\d+)|Control stream received unexpected disconnect event|Quit event received).*$')
+    $terminations=[regex]::Matches($currentLog,'(?m)^.*Connection terminated:\s*(-?\d+).*$')
+    $failure=if($terminations.Count){$terminations[$terminations.Count-1].Value.Trim()}elseif($failures.Count){$failures[$failures.Count-1].Value.Trim()}else{''}
+    [pscustomobject]@{windowMatches=$windowMatches;videoReceived=$videoReceived;decoderChosen=$decoderChosen;disconnected=($failures.Count -gt 0);failure=$failure;ready=($windowMatches -and $videoReceived -and $decoderChosen -and -not $failures.Count)}
 }
 function Test-VmctlStreamingSessionFreshness {
     param([Parameter(Mandatory)][object]$Expires,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow)
