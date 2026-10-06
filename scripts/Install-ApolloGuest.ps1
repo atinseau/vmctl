@@ -8,10 +8,12 @@ $installer = Join-Path $stage $package.file
 if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne $package.sha256) { throw 'Apollo installer hash mismatch.' }
 $installed = @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object DisplayName -eq 'Apollo')
 $changed = $false
+$restartRequired = $false
 if (-not $installed -and (Get-Service sunshinesvc -ErrorAction SilentlyContinue)) { throw 'An existing Sunshine service must be reviewed before installing Apollo.' }
 if (-not ($installed | Where-Object DisplayVersion -eq $package.version)) {
     $process = Start-Process -FilePath $installer -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru
     if ($process.ExitCode -notin @(0,3010)) { throw "Apollo installer exit code $($process.ExitCode)." }
+    $restartRequired=($process.ExitCode -eq 3010)
     $changed = $true
 }
 $service = Get-Service -Name ApolloService -ErrorAction Stop
@@ -20,8 +22,11 @@ if ($service.Status -ne 'Running') { Start-Service -Name ApolloService }
 $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
 $root = Join-Path $env:ProgramFiles 'Apollo'
 if (-not (Test-Path -LiteralPath (Join-Path $root 'sunshine.exe'))) { throw 'Apollo executable missing.' }
-$versionResult=& (Join-Path $root 'sunshine.exe') --version 2>&1
-if (($versionResult -join "`n") -notmatch [regex]::Escape($package.version)) { throw 'Installed Apollo version differs from the selected release.' }
+# Starting a second sunshine process rotates the live service's log. Check the
+# installer registration here; the authenticated API checks the running version.
+$registered=@(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue|Where-Object {$_.DisplayName -eq 'Apollo' -and $_.DisplayVersion -eq $package.version})
+if($registered.Count -ne 1){throw 'Apollo version registration differs from the selected release.'}
+$versionResult=(Get-Item -LiteralPath (Join-Path $root 'sunshine.exe')).VersionInfo.ProductVersion
 # The official installer adds program rules. Restrict them to the local subnet.
 Get-NetFirewallRule -DisplayName 'Apollo' -ErrorAction Stop | Set-NetFirewallRule -RemoteAddress LocalSubnet
 $deadline = (Get-Date).AddSeconds(60)
@@ -31,7 +36,7 @@ do {
     Start-Sleep -Seconds 2
 } while ((Get-Date) -lt $deadline)
 [pscustomobject]@{
-    computer=$env:COMPUTERNAME; version=$package.version; installerChanged=$changed
+    computer=$env:COMPUTERNAME; version=$package.version; installerChanged=$changed;restartRequired=$restartRequired
     executableVersion=($versionResult -join "`n")
     root=$root; service=(Get-Service ApolloService).Status.ToString()
     startMode=(Get-CimInstance Win32_Service -Filter "Name='ApolloService'").StartMode

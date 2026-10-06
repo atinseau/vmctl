@@ -10,6 +10,18 @@ function Assert-That([bool]$Condition,[string]$Label) {
     $script:passed++; Write-Output "OK: $Label"
 }
 try {
+    $realLog="FFmpeg-based video decoder chosen`nReceived first video packet after 300 ms"
+    Assert-That (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' $realLog).ready 'Window and real video reception prove readiness'
+    Assert-That (-not (Get-VmctlStreamEvidence 'Moonlight' 'win-vm' $realLog).ready) 'Launcher window does not prove stream readiness'
+    Assert-That (-not (Get-VmctlStreamEvidence 'other-vm - Moonlight' 'win-vm' $realLog).ready) 'Another VM window is rejected'
+    Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' 'Test decode successful').ready) 'Decoder self-test does not prove reception'
+    Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' 'FFmpeg-based video decoder chosen').ready) 'Configured decoder without packets is not ready'
+    Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' 'Received first video packet after 300 ms').ready) 'Packets without a chosen decoder are not ready'
+    $now=[DateTimeOffset]'2026-10-06T09:00:00Z'
+    $parsed='{ "expires": "2026-10-06T10:00:00Z" }'|ConvertFrom-Json
+    Assert-That (Test-VmctlStreamingSessionFreshness -Expires $parsed.expires -Now $now) 'JSON dates retain October instead of becoming June'
+    Assert-That (Test-VmctlStreamingSessionFreshness -Expires '2026-10-06T12:00:00+02:00' -Now $now) 'Offset string session expiry is accepted'
+    Assert-That (-not (Test-VmctlStreamingSessionFreshness -Expires '2026-10-06T08:00:00Z' -Now $now)) 'Expired session is rejected'
     $root=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($fixture)
     try {
         $root.SetValue('certificate','fixture-client-certificate')

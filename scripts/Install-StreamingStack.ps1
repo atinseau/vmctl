@@ -6,7 +6,8 @@ param(
     [string]$CredentialFile,
     [string]$UserName,
     [string]$Config,
-    [string]$ReportDirectory
+    [string]$ReportDirectory,
+    [switch]$Open
 )
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
@@ -51,9 +52,26 @@ function Invoke-GuestApi([hashtable]$ApiRequest) {
         return (Invoke-Cli @('run','-Vm',$Vm,'-CredentialFile',$CredentialFile,'-File',(Join-Path $PSScriptRoot 'Invoke-ApolloSetupApiGuest.ps1'),'-TimeoutSeconds','90') 90)
     } finally { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }
 }
+function Wait-GuestReady {
+    $deadline=(Get-Date).AddMinutes(3)
+    do {
+        try { $null=Invoke-Cli @('exec','-Vm',$Vm,'-CredentialFile',$CredentialFile,'-Command','$env:COMPUTERNAME','-TimeoutSeconds','15') 15;return }
+        catch { $lastFailure=$_.Exception.Message;Start-Sleep -Seconds 2 }
+    } while((Get-Date) -lt $deadline)
+    throw "PowerShell Direct did not return after startup: $lastFailure"
+}
 try {
     # Independent QSettings instances can overwrite each other's pairing cache.
     $clients=@(Get-Process Moonlight -ErrorAction SilentlyContinue)
+    if($Open -and @($clients|Where-Object {$_.MainWindowTitle -like '* - Moonlight'}).Count) {
+        # Resume an already opened matching stream without reinstalling or closing it.
+        $openArguments=@('streaming-open','-Vm',$Vm)
+        if(Test-Path -LiteralPath $statusPath){$previous=Get-Content -LiteralPath $statusPath -Raw|ConvertFrom-Json;if($previous.state -eq 'failed' -and $previous.message -match 'streaming-open failed'){$openArguments+='-Reconnect'}}
+        $opened=Invoke-Cli $openArguments
+        $opened|Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-open.json')
+        Save-State 'stream-window-open' 'The matching Moonlight stream is already open and receiving video.'
+        return
+    }
     if(@($clients|Where-Object {$_.MainWindowTitle -and $_.MainWindowTitle -ne 'Moonlight'}).Count) { throw 'Disconnect the active Moonlight stream before configuring another VM.' }
     if($clients.Count) {
         $reopenMoonlight=$true
@@ -88,6 +106,8 @@ try {
         if ($credentialResult.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $CredentialFile)) { throw 'VM credential entry failed or was cancelled.' }
     }
     Save-State 'guest-installation' 'Installing Apollo through public vmctl.'
+    if($gpuInfo.vmState -eq 'Off'){$null=Invoke-Cli @('start','-Vm',$Vm,'-TimeoutSeconds','900') 900;Wait-GuestReady}
+    elseif($gpuInfo.vmState -ne 'Running'){throw "VM state $($gpuInfo.vmState) must be resolved before installation."}
     $doctor=Invoke-Cli @('doctor','-Vm',$Vm,'-CredentialFile',$CredentialFile)
     $doctor | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-doctor.json') -Encoding utf8
     $null=Invoke-Cli @('exec','-Vm',$Vm,'-CredentialFile',$CredentialFile,'-Command',"`$null=New-Item -ItemType Directory -Path 'C:\ProgramData\vmctl\streaming' -Force; `$acl=Get-Acl 'C:\ProgramData\vmctl\streaming'; `$acl.SetAccessRuleProtection(`$true,`$false); foreach(`$sid in @('S-1-5-18','S-1-5-32-544')) { `$rule=New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier(`$sid)),'FullControl','ContainerInherit,ObjectInherit','None','Allow'); `$acl.AddAccessRule(`$rule) }; Set-Acl 'C:\ProgramData\vmctl\streaming' `$acl")
@@ -98,6 +118,22 @@ try {
     $guest=Invoke-Cli @('run','-Vm',$Vm,'-CredentialFile',$CredentialFile,'-File',(Join-Path $PSScriptRoot 'Install-ApolloGuest.ps1'),'-TimeoutSeconds','600') 600
     $guest | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-apollo-guest.json') -Encoding utf8
     $guestInfo=$guest | ConvertFrom-Json
+    $rendering=@{restartRequired=$false;changed=$false}
+    if(@($gpuInfo.assigned).Count -gt 0 -and @($guestInfo.gpu|Where-Object {$_.Name -match '^NVIDIA ' -and $_.ConfigManagerErrorCode -eq 0}).Count -eq 1) {
+        Save-State 'guest-display-preparation' 'Separating Hyper-V console rendering from the shared NVIDIA GPU.'
+        $rendering=(Invoke-Cli @('run','-Vm',$Vm,'-CredentialFile',$CredentialFile,'-File',(Join-Path $PSScriptRoot 'Set-GuestConsoleRendering.ps1'))) | ConvertFrom-Json
+        $rendering | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-console-rendering.json')
+    }
+    if($guestInfo.restartRequired -or $rendering.restartRequired) {
+        Save-State 'guest-restarting' 'Restarting the guest and reusing the same Windows credential.'
+        $null=Invoke-Cli @('restart','-Vm',$Vm,'-TimeoutSeconds','900') 900
+        Wait-GuestReady
+        $guest=Invoke-Cli @('run','-Vm',$Vm,'-CredentialFile',$CredentialFile,'-File',(Join-Path $PSScriptRoot 'Install-ApolloGuest.ps1'),'-TimeoutSeconds','600') 600
+        $guestInfo=$guest|ConvertFrom-Json
+        $guest|Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-apollo-guest.json')
+        if($guestInfo.restartRequired){throw 'Apollo still requests a restart after startup.'}
+    }
+    if(-not @($guestInfo.displayDrivers|Where-Object {$_.FriendlyName -eq 'SudoMaker Virtual Display Adapter' -and $_.Status -eq 'OK'}).Count){throw 'Apollo virtual display driver is not healthy after installation.'}
     $address=$null
     foreach ($candidate in $guestInfo.ipv4) {
         $socket=[Net.Sockets.TcpClient]::new()
@@ -121,7 +157,7 @@ try {
         $apiCredential=[pscredential]::new('vmctl',(ConvertTo-SecureString $password -AsPlainText -Force))
         $action='initialize'
     }
-    $apiRequest=@{action=$action;username=$apiCredential.UserName;password=$apiCredential.GetNetworkCredential().Password}
+    $apiRequest=@{action=$action;username=$apiCredential.UserName;password=$apiCredential.GetNetworkCredential().Password;expectedVersion=$packages.apollo.version}
     $apiResult=Invoke-GuestApi $apiRequest
     if ($action -eq 'initialize') { $apiCredential | Export-Clixml -LiteralPath $secretPath }
     $apiResult | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-apollo-api.json') -Encoding utf8
@@ -168,6 +204,12 @@ try {
     @{vm=$Vm;vmName=$target.vmName;vmId=$gpuInfo.vmId;serverUuid=$pairedHosts[0].uuid} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bindingDirectory "$Vm.json") -Encoding utf8
     @{vm=$Vm;vmName=$target.vmName;vmId=$gpuInfo.vmId;address=$address;webUi="https://${address}:47990";moonlight=$moonlight;moonlightHostUuid=$pairedHosts[0].uuid;apolloVersion=$packages.apollo.version;moonlightVersion=$packages.moonlight.version;paired=$true;streamTested=$false;gpuAssigned=(@($gpuInfo.assigned).Count -gt 0);apolloGpuConfigured=$gpuConfigured;apolloAdministratorCredentialFile=$secretPath;checkpointsModified=$false} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-install-result.json') -Encoding utf8
     Save-State 'installed-and-paired' 'Moonlight and Apollo installed, paired, and app listing verified. GPU acceleration and a video stream remain to be tested.'
+    if($Open) {
+        Save-State 'opening-stream' 'Opening the paired Virtual Display with the saved Moonlight preferences.'
+        $opened=Invoke-Cli @('streaming-open','-Vm',$Vm)
+        $opened|Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-open.json')
+        Save-State 'stream-window-open' 'Moonlight has a visible streaming window. Consult the stream diagnostics to verify video delivery.'
+    }
 } catch {
     Save-State 'failed' $_.Exception.Message
     throw

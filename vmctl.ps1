@@ -1,7 +1,7 @@
 #requires -Version 7.2
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)][ValidateSet('help', 'list', 'register', 'exec', 'run', 'upload', 'doctor', 'checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'gpu-setup', 'gpu-status', 'gpu-sync', 'gpu-remove', 'gpu-task-test', 'streaming-install', 'streaming-access', 'streaming-forget', 'streaming-status', 'streaming-display-fix', 'streaming-display-restore', 'streaming-video-test', 'streaming-video-restore', 'capabilities', 'screenshot', 'move', 'click', 'type', 'key', 'scroll', 'drag')]
+    [Parameter(Position = 0)][ValidateSet('help', 'list', 'register', 'exec', 'run', 'upload', 'doctor', 'checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'gpu-setup', 'gpu-status', 'gpu-sync', 'gpu-remove', 'gpu-task-test', 'streaming-install', 'streaming-open', 'streaming-access', 'streaming-forget', 'streaming-status', 'streaming-display-fix', 'streaming-display-restore', 'streaming-video-test', 'streaming-video-restore', 'capabilities', 'screenshot', 'move', 'click', 'type', 'key', 'scroll', 'drag')]
     [string]$Action = 'help',
     [string]$Vm, [string]$Command, [string]$File, [string]$Source, [string]$Destination,
     [string]$Name, [string]$HostName, [string]$UserName,
@@ -13,7 +13,7 @@ param(
     [Management.Automation.PSCredential]$Credential, [string]$CredentialFile,
     [ValidateSet('powershell.exe', 'pwsh.exe', 'sh', 'bash')][string]$Shell,
     [ValidateRange(1, 86400)][int]$TimeoutSeconds = 120,
-    [string]$Config, [switch]$Recursive,
+    [string]$Config, [switch]$Recursive, [switch]$Open, [switch]$Reconnect,
     [string]$OutFile, [string]$Frame, [string]$Text, [string]$Keys, [string]$ReportDirectory,
     [string]$GpuName='NVIDIA GeForce RTX 4090', [ValidateRange(1,100)][int]$GpuPercent=25,
     [ValidateSet('software','nvenc')][string]$Encoder,
@@ -45,7 +45,8 @@ vmctl : PowerShell Direct (Hyper-V Windows local), SSH et console optionnelle
   vmctl storage -Vm win-vm
   vmctl compact -Vm win-vm -TimeoutSeconds 900
   vmctl compact -Vm win-vm -RemoveCheckpoints -TimeoutSeconds 1800
-  vmctl streaming-install -Vm win-vm [-CredentialFile PATH] [-ReportDirectory PATH]
+  vmctl streaming-install -Vm win-vm [-Open] [-CredentialFile PATH] [-ReportDirectory PATH]
+  vmctl streaming-open -Vm win-vm [-Reconnect]
   vmctl streaming-access -Vm win-vm
   vmctl streaming-forget -Vm win-vm [-HostName IPv4]
   vmctl streaming-status -Vm win-vm [-HostName IPv4]
@@ -80,8 +81,12 @@ Les checkpoints et la capacite virtuelle sont conserves.
 -RemoveCheckpoints supprime tous les checkpoints de la cible et attend leur fusion.
 -DisableAutomaticCheckpoints desactive leur creation automatique (compact/checkpoint).
 streaming-install installe Moonlight sur l'hote, Apollo dans la VM et les appaire.
+Avec -Open, il ouvre Virtual Display et verifie la fenetre et la reception video.
+streaming-open reutilise cet appairage sans identification Windows ni UAC.
+Le client est lance avec les droits de la session Windows normale.
 Une elevation UAC est lancee une seule fois si necessaire ; cet appel retourne alors
 un PID et le chemin du rapport. Etat final dans streaming-status.json.
+Une session en echec peut etre reprise pendant 30 minutes en relancant la commande.
 Les versions et SHA-256 officiels sont fixes. Aucun GPU n'est affecte automatiquement.
 streaming-access ouvre une boite de dialogue locale pour copier le mot de passe
 administrateur Apollo chiffre, sans l'afficher dans la sortie du CLI.
@@ -107,6 +112,8 @@ Les autres codes sont ceux du programme distant (ou de scp).
     if ($OnlyDisplay -and $Action -ne 'streaming-video-test') { throw '-OnlyDisplay requires streaming-video-test.' }
     if ($OnlyDisplay -and $ConsoleDisplay) { throw '-OnlyDisplay and -ConsoleDisplay are mutually exclusive.' }
     if ($Diagnostics -and $Action -ne 'streaming-status') { throw '-Diagnostics is supported only with streaming-status.' }
+    if ($Open -and $Action -ne 'streaming-install') { throw '-Open is supported only with streaming-install.' }
+    if ($Reconnect -and $Action -ne 'streaming-open') { throw '-Reconnect is supported only with streaming-open.' }
     if ($Action -eq 'register') {
         if (-not $Vm -or $Vm -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]*$') { throw 'register exige un -Vm valide.' }
         if (-not $Os) { throw 'register exige -Os.' }
@@ -162,17 +169,52 @@ Les autres codes sont ceux du programme distant (ou de scp).
     if ($Action -eq 'streaming-install') {
         if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'streaming-install exige une VM Windows Hyper-V locale utilisant Direct.' }
         if ($Credential) { throw 'streaming-install accepte -CredentialFile ; sinon une fenetre de saisie est ouverte.' }
+        Import-Module (Join-Path $PSScriptRoot 'src/StreamingSupport.psm1') -Force
+        $sessionPath=Join-Path $env:LOCALAPPDATA "vmctl\streaming-sessions\$Vm.json"
+        # Recover a live older setup referenced by an explicit report directory.
+        # Early sessions did not yet keep a per-directory copy of their metadata.
+        if($ReportDirectory -and (Test-Path -LiteralPath (Join-Path $ReportDirectory 'streaming-status.json'))) {
+            $previous=Get-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-status.json') -Raw|ConvertFrom-Json
+            $priorProcess=Get-Process -Id $previous.pid -ErrorAction SilentlyContinue
+            if($previous.vm -eq $Vm -and $previous.state -eq 'failed' -and $priorProcess -and $priorProcess.ProcessName -eq 'pwsh') {
+                $folders=@(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'vmctl\work') -Directory -Filter 'setup-session-*'|Where-Object {
+                    $_.Name -match '^setup-session-[a-f0-9]{32}$' -and [Math]::Abs(($_.CreationTimeUtc-$priorProcess.StartTime.ToUniversalTime()).TotalSeconds) -lt 2 -and (Test-Path -LiteralPath (Join-Path $_.FullName 'guest-credential.clixml'))
+                })
+                if($folders.Count -eq 1 -and $target.ContainsKey('user')) {
+                    $cached=Import-Clixml -LiteralPath (Join-Path $folders[0].FullName 'guest-credential.clixml')
+                    $expires=[DateTimeOffset]$priorProcess.StartTime.ToUniversalTime().AddMinutes(30)
+                    if($cached.UserName -ieq $target.user -and (Test-VmctlStreamingSessionFreshness $expires)) {
+                        @{vm=$Vm;vmName=$target.vmName;vmId=$(if($target.ContainsKey('vmId')){$target.vmId}else{''});pid=$priorProcess.Id;startTicks=$priorProcess.StartTime.ToUniversalTime().Ticks;directory=$folders[0].FullName;expires=$expires.ToString('o');state='waiting-retry';statusFile=[IO.Path]::GetFullPath((Join-Path $ReportDirectory 'streaming-status.json'))}|ConvertTo-Json|Set-Content -LiteralPath $sessionPath
+                    }
+                    $cached=$null
+                }
+            }
+        }
+        if(Test-Path -LiteralPath $sessionPath) {
+            $session=Get-Content -LiteralPath $sessionPath -Raw|ConvertFrom-Json
+            $existing=Get-Process -Id $session.pid -ErrorAction SilentlyContinue
+            if($existing -and $existing.ProcessName -eq 'pwsh' -and $existing.StartTime.ToUniversalTime().Ticks -eq $session.startTicks -and (Test-VmctlStreamingSessionFreshness -Expires $session.expires)) {
+                if($session.vmName -ine $target.vmName -or ($target.ContainsKey('vmId') -and $session.vmId -ine $target.vmId)){throw 'Existing setup session belongs to another VM.'}
+                if($session.state -eq 'waiting-retry'){
+                    @{open=[bool]$Open}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $session.directory 'retry.json') -Encoding utf8
+                    $state='retry-requested'
+                } else {$state='already-running'}
+                @{state=$state;pid=$session.pid;statusFile=$session.statusFile;sessionExpires=$session.expires}|ConvertTo-Json
+                exit 0
+            }
+        }
         if (-not $ReportDirectory) { $ReportDirectory=Join-Path $env:LOCALAPPDATA "vmctl\reports\streaming\$Vm" }
         $recipeArgs=@{Vm=$Vm;Config=[IO.Path]::GetFullPath($Config);ReportDirectory=[IO.Path]::GetFullPath($ReportDirectory)}
+        if($Open){$recipeArgs.Open=$true}
         if ($CredentialFile) { $recipeArgs.CredentialFile=[IO.Path]::GetFullPath($CredentialFile) }
         if ($UserName) { $recipeArgs.UserName=$UserName }
         $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
         $principal=[Security.Principal.WindowsPrincipal]::new($identity)
         if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-            & (Join-Path $PSScriptRoot 'scripts\Install-StreamingStack.ps1') @recipeArgs
+            & (Join-Path $PSScriptRoot 'scripts\Start-StreamingSession.ps1') @recipeArgs
         } else {
-            $literalArgs=@($recipeArgs.GetEnumerator() | ForEach-Object { '-'+$_.Key+" '"+$_.Value.Replace("'","''")+"'" })
-            $recipePath=(Join-Path $PSScriptRoot 'scripts\Install-StreamingStack.ps1').Replace("'","''")
+            $literalArgs=@($recipeArgs.GetEnumerator() | ForEach-Object { if($_.Value -is [bool]){'-'+$_.Key}else{'-'+$_.Key+" '"+$_.Value.Replace("'","''")+"'"} })
+            $recipePath=(Join-Path $PSScriptRoot 'scripts\Start-StreamingSession.ps1').Replace("'","''")
             $code="& '$recipePath' "+($literalArgs -join ' ')
             $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
             $process=Start-Process -FilePath (Join-Path $PSHOME 'pwsh.exe') -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded -Verb RunAs -WindowStyle Hidden -PassThru
@@ -181,6 +223,13 @@ Les autres codes sont ceux du programme distant (ou de scp).
         exit 0
     }
     switch ($Action) {
+        'streaming-open' {
+            if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'streaming-open requires a local Hyper-V Windows target.' }
+            $openArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'scripts\Open-StreamingHost.ps1'),'-Vm',$Vm,'-VmName',$target.vmName)
+            if($target.ContainsKey('vmId')){$openArgs+=@('-VmId',$target.vmId)}
+            if($Reconnect){$openArgs+='-Reconnect'}
+            $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $openArgs -TimeoutSeconds $TimeoutSeconds
+        }
         'streaming-forget' {
             if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'streaming-forget requires a local Hyper-V Windows target.' }
             $forgetArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'scripts\Remove-StreamingHost.ps1'),'-Vm',$Vm,'-VmName',$target.vmName)

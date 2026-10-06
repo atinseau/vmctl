@@ -32,7 +32,7 @@ function Set-VmctlRegistrySnapshot {
 }
 function Remove-VmctlMoonlightHost {
     param([Parameter(Mandatory)][string]$ServerUuid,[string]$RegistrySubKey='Software\Moonlight Game Streaming Project\Moonlight')
-    if(Get-Process Moonlight -ErrorAction SilentlyContinue){throw 'Close Moonlight before modifying its saved hosts.'}
+    if($RegistrySubKey -ieq 'Software\Moonlight Game Streaming Project\Moonlight' -and (Get-Process Moonlight -ErrorAction SilentlyContinue)){throw 'Close Moonlight before modifying its saved hosts.'}
     $root=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($RegistrySubKey,$true)
     if(-not $root){return [pscustomobject]@{removed=0;uuid=$ServerUuid}}
     $removed=0
@@ -62,4 +62,17 @@ function Remove-VmctlMoonlightHost {
     } finally {$root.Dispose()}
     [pscustomobject]@{removed=$removed;uuid=$ServerUuid}
 }
-Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost
+function Get-VmctlStreamEvidence {
+    param([string]$WindowTitle,[string]$HostName,[string]$Log)
+    $windowMatches=($WindowTitle -ieq ($HostName+' - Moonlight'))
+    $videoReceived=($Log -match 'Received first video packet after \d+ ms')
+    $decoderChosen=($Log -match 'video decoder chosen')
+    [pscustomobject]@{windowMatches=$windowMatches;videoReceived=$videoReceived;decoderChosen=$decoderChosen;ready=($windowMatches -and $videoReceived -and $decoderChosen)}
+}
+function Test-VmctlStreamingSessionFreshness {
+    param([Parameter(Mandatory)][object]$Expires,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow)
+    # ConvertFrom-Json may already return a DateTime. Parsing its localized
+    # string can swap the month and day (for example 06/10 in French).
+    $Now -lt [DateTimeOffset]$Expires
+}
+Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Test-VmctlStreamingSessionFreshness

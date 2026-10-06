@@ -68,6 +68,12 @@ Write-Output $x
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-status requires') 'Diagnostic Apollo refuse sur cible SSH avant lecture des identifiants ou appel reseau'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-forget','-Vm','test','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-forget requires') 'Suppression de profil refusee sur cible SSH avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-open','-Vm','test','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-open requires') 'Ouverture Moonlight refusee sur cible SSH avant lancement'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'gpu-setup','-Vm','test','-Open','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'Open is supported only') 'Option ouverture reservee a installation streaming avant mutation'
+    $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'gpu-setup','-Vm','test','-Reconnect','-Config',$config)
+    Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'Reconnect is supported only') 'Option reconnexion reservee a ouverture streaming avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-Config',$config)
     Assert-That ($result.ExitCode -eq 2 -and $result.Stderr -match 'streaming-status requires') 'Changement encodeur refuse sur cible SSH avant mutation'
     $result = Invoke-VmctlProcess $runtime @('-NoProfile','-File',$cli,'streaming-video-test','-Vm','test','-Encoder','software','-Diagnostics','-Config',$config)

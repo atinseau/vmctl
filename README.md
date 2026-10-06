@@ -32,11 +32,13 @@ Sur une VM Windows deja preparee avec un compte administrateur et un mot de pass
 
 ```powershell
 vmctl gpu-setup -Vm ma-vm -GpuName 'NVIDIA GeForce RTX 4090' -GpuPercent 25
-vmctl streaming-install -Vm ma-vm
+vmctl streaming-install -Vm ma-vm -Open
 vmctl streaming-status -Vm ma-vm -Diagnostics
+# Connexions suivantes, sans mot de passe Windows ni UAC :
+vmctl streaming-open -Vm ma-vm
 ```
 
-La recette reutilise Moonlight, installe Apollo, configure NVENC lorsqu'un GPU NVIDIA sain est attribue et effectue l'appairage automatiquement. Le service demarre avec Windows. La synchronisation des pilotes GPU-P est planifiee sur l'hote. Verifier ensuite un vrai flux : l'installation ne valide pas sa fluidite. Les budgets GPU-P ne garantissent pas un pourcentage identique de performances de jeu.
+La recette reutilise Moonlight, installe Apollo, prepare le rendu GPU-P NVIDIA, redemarre la VM si necessaire et effectue l'appairage automatiquement. `-Open` ouvre Virtual Display avec les preferences Moonlight conservees. La reception video est verifiee dans le journal client ; la fluidite et le son exigent un essai reel. Le service demarre avec Windows et la synchronisation des pilotes GPU-P est planifiee sur l'hote. Les budgets GPU-P ne garantissent pas un pourcentage identique de performances de jeu.
 
 Windows doit deja etre initialise dans la VM. Cette recette ne cree pas la VM et n'installe pas Atlas automatiquement. [Installation, reglages et diagnostic streaming](docs/streaming.md).
 

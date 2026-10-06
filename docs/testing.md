@@ -20,10 +20,10 @@ Depuis la racine, avec PowerShell 7.2+ sur Windows :
 | `Test-PowerShellDirect.ps1` | Transport, planification Direct et compatibilite DPAPI entre PowerShell 7 et 5.1. |
 | `Test-ConsoleGuards.ps1` | Captures, entrees, usage unique des frames et conversion RGB565, sans console VM. |
 | `Test-GpuPlanning.ps1` | Calcul UInt64 des budgets, empreintes et refus de chemins dangereux. |
-| `Test-StreamingSupport.ps1` | Selection par UUID/adresse, suppression ciblee dans hosts et hostsbackup, conservation des autres certificats, applications et preferences. |
+| `Test-StreamingSupport.ps1` | Profils par UUID/adresse, conservation de QSettings, expiration avec dates JSON et refus de faux indicateurs de reception video. |
 
 Les fixtures restent dans `work/`, ignore par Git. Certains essais de compilateur ou de shell POSIX sont ignores si ces outils sont indisponibles ; le resultat le signale. Un test local reussi ne confirme pas un streaming dans une VM.
-Le test streaming utilise uniquement une cle HKCU temporaire sous `Software\vmctl-tests`, supprimee en fin de test. Fermer Moonlight avant de le lancer ; il ne modifie pas les vrais profils.
+Le test streaming utilise uniquement une cle HKCU temporaire sous `Software\vmctl-tests`, supprimee en fin de test. Il peut etre execute pendant un flux Moonlight ; il ne modifie pas les vrais profils.
 
 ## Test explicite sur une vraie VM
 

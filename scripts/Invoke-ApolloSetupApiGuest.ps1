@@ -24,6 +24,8 @@ try {
         if (-not $result.status) { throw 'Apollo administrator initialization rejected.' }
     }
     $null=Invoke-LocalApi '/api/login' @{username=$request.username;password=$request.password}
+    $runningConfig=Get-LocalApi '/api/config'
+    if($request.PSObject.Properties.Name -contains 'expectedVersion' -and $runningConfig.version -ne $request.expectedVersion){throw 'Running Apollo version differs from the selected release.'}
     $pinAccepted=$null
     $gpuConfig=$null
     if ($request.action -eq 'pair') {
@@ -68,7 +70,7 @@ try {
         } while ($true)
         $gpuConfig=@{adapter=$saved.adapter_name;encoder=$saved.encoder;headless=$saved.headless_mode;backup=$backup;serviceRestarted=$true}
     }
-    [pscustomobject]@{action=$request.action;authenticated=$true;pinAccepted=$pinAccepted;gpuConfig=$gpuConfig} | ConvertTo-Json -Depth 5
+    [pscustomobject]@{action=$request.action;authenticated=$true;runningVersion=$runningConfig.version;pinAccepted=$pinAccepted;gpuConfig=$gpuConfig} | ConvertTo-Json -Depth 5
 } finally {
     foreach ($path in @($inputPath,$bodyPath,$cookiePath)) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }
 }

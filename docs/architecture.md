@@ -16,7 +16,10 @@
 | `src/HyperV.ps1` | Demarrage/arret, checkpoints et disques. |
 | `src/Console.ps1` | Delegation des captures et entrees Hyper-V. |
 | `src/Gpu.ps1`, `src/GpuSupport.psm1` | Worker GPU, quotas et validation des chemins. |
-| `src/StreamingSupport.psm1` | Identification des profils Moonlight et suppression ciblee des tableaux QSettings. |
+| `src/StreamingSupport.psm1` | Profils Moonlight, expiration des sessions et preuve de reception video. |
+| `scripts/Start-StreamingSession.ps1` | Session elevee temporaire et reprise de la recette sans ressaisir les identifiants. |
+| `scripts/Open-StreamingHost.ps1` | Ouverture/reconnexion du flux par UUID et verification de sa fenetre/journal. |
+| `scripts/Start-InteractiveProcess.ps1` | Lancement de Moonlight avec le jeton de la session Windows normale. |
 | `scripts/` | Workers Windows, installateurs et recettes. |
 | `tests/` | Tests locaux et test explicite sur une vraie VM. |
 | `docs/` | Guides par workflow. |
