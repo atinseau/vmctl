@@ -55,7 +55,9 @@ do {
     if((Get-Date) -ge $helperDeadline){throw 'A Moonlight CLI helper is still running; wait for that command to finish before opening a stream.'}
     Start-Sleep -Milliseconds 250
 }while($true)
-$alreadyOpen=$false;$logPath='';$restartVirtualDisplay=$false
+$alreadyOpen=$false;$logPath=''
+# A paused Apollo desktop survives even when the Moonlight process is gone.
+$restartVirtualDisplay=($Reconnect -and $Application -eq 'Virtual Display' -and $previousApplication -eq 'Virtual Display' -and $saved -and $saved.serverUuid -ieq $uuid)
 if($processes.Count) {
     if($processes.Count -ne 1){throw 'Multiple Moonlight processes require review.'}
     $process=$processes[0]
@@ -83,7 +85,7 @@ if($processes.Count) {
     if($Reconnect -or $process.MainWindowTitle -eq 'Moonlight') {
         # Apollo's resume keeps the old virtual monitor dimensions. Recreate
         # our desktop application so the launch request configures the guest.
-        $restartVirtualDisplay=($Application -eq 'Virtual Display' -and $previousApplication -eq 'Virtual Display' -and $savedMatches)
+        $restartVirtualDisplay=($restartVirtualDisplay -or ($Application -eq 'Virtual Display' -and $previousApplication -eq 'Virtual Display' -and $savedMatches))
         $null=$process.CloseMainWindow()
         if(-not $process.WaitForExit(15000)){throw 'The matching Moonlight stream did not close cleanly.'}
         $process=$null;$alreadyOpen=$false;$logPath=''
