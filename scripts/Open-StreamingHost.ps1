@@ -114,6 +114,9 @@ if(-not $alreadyOpen) {
         # End the paused virtual-display application before opening the console.
         $quit=Invoke-VmctlProcess $moonlight @('quit',$uuid) -TimeoutSeconds 30
         if($quit.ExitCode -ne 0){throw "Could not end the previous desktop stream: $($quit.Stderr)"}
+        # Apollo restores the previous Windows topology asynchronously after
+        # quitting. Do not let that restoration overwrite the next display.
+        Start-Sleep -Milliseconds 3500
     }
     $list=Invoke-VmctlProcess $moonlight @('list',$uuid) -TimeoutSeconds 45
     if($list.ExitCode -ne 0 -or $list.Stdout -notmatch ('(?m)^\s*'+[regex]::Escape($Application)+'\s*\r?$')){throw "The paired application '$Application' is unavailable: $($list.Stderr)"}
@@ -122,8 +125,11 @@ if(-not $alreadyOpen) {
     $mouseOption=if($absolute){'--absolute-mouse'}else{'--no-absolute-mouse'}
     $displayOption=if($Mode -eq 'fullscreen'){'--capture-system-keys always'}else{''}
     $bitrateOption=if($manualBitrate -ge 500 -and $manualBitrate -le 500000){"--bitrate $manualBitrate"}else{''}
+    # Apollo applies automatic resolution/refresh only when the client sends
+    # the game-optimization flag, even for a virtual desktop application.
+    $resolutionOption=if($Application -eq 'Virtual Display'){'--game-optimization'}else{''}
     # Let Moonlight use the user's codec and bitrate preferences, including AV1.
-    $arguments="stream $uuid `"$Application`" --resolution ${width}x${height} --fps $fps $bitrateOption $mouseOption --display-mode $($display.displayMode) $displayOption"
+    $arguments="stream $uuid `"$Application`" --resolution ${width}x${height} --fps $fps $bitrateOption $mouseOption --display-mode $($display.displayMode) $displayOption $resolutionOption"
     $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         $newPid=& (Join-Path $PSScriptRoot 'Start-InteractiveProcess.ps1') -Executable $moonlight -Arguments $arguments -WorkingDirectory (Split-Path $moonlight)
