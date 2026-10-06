@@ -8,6 +8,11 @@ param(
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../src/Vmctl.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../src/StreamingSupport.psm1') -Force
+$launchLock=[Threading.Mutex]::new($false,('Local\vmctl-moonlight-'+[Security.Principal.WindowsIdentity]::GetCurrent().User.Value))
+$lockTaken=$false
+try {
+try {$lockTaken=$launchLock.WaitOne(0)}catch [Threading.AbandonedMutexException]{$lockTaken=$true}
+if(-not $lockTaken){throw 'A vmctl streaming-open operation is already running; wait for its result before retrying.'}
 $bindingPath=Join-Path (Get-VmctlDataRoot) "streaming-bindings\$Vm.json"
 if(-not(Test-Path -LiteralPath $bindingPath)){throw 'No saved streaming binding; run streaming-install first.'}
 $binding=Get-Content -LiteralPath $bindingPath -Raw|ConvertFrom-Json
@@ -30,14 +35,27 @@ try {
     $absolute=[bool]$key.GetValue('mouseacceleration',0)
 } finally {$key.Dispose()}
 if($fps -lt 10 -or $fps -gt 480 -or $width -lt 320 -or $width -gt 16384 -or $height -lt 240 -or $height -gt 16384){throw 'Saved streaming dimensions or frame rate are invalid.'}
-$processes=@(Get-Process Moonlight -ErrorAction SilentlyContinue)
+# A CLI list/quit process is never a stream. Give outstanding helpers time to
+# finish rather than adopting their PID or terminating them.
+$helperDeadline=(Get-Date).AddSeconds(15)
+do {
+    $processes=@(Get-Process Moonlight -ErrorAction SilentlyContinue | Where-Object {-not $_.HasExited})
+    $helpers=@($processes|Where-Object {
+        $line=(Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine
+        (Get-VmctlMoonlightProcessRole -CommandLine $line -ServerUuid $uuid) -eq 'helper'
+    })
+    if(-not $helpers.Count){break}
+    if((Get-Date) -ge $helperDeadline){throw 'A Moonlight CLI helper is still running; wait for that command to finish before opening a stream.'}
+    Start-Sleep -Milliseconds 250
+}while($true)
 $alreadyOpen=$false;$logPath=''
 if($processes.Count) {
     if($processes.Count -ne 1){throw 'Multiple Moonlight processes require review.'}
     $process=$processes[0]
     $savedMatches=($saved -and $saved.serverUuid -ieq $uuid -and $saved.pid -eq $process.Id -and $saved.startTicks -eq $process.StartTime.ToUniversalTime().Ticks)
     $commandLine=(Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)").CommandLine
-    if(-not $savedMatches -and (-not $commandLine -or $commandLine -notmatch ([regex]::Escape($uuid)))){throw 'The open Moonlight process cannot be identified as this VM; close it first.'}
+    $role=Get-VmctlMoonlightProcessRole -CommandLine $commandLine -ServerUuid $uuid
+    if($role -ne 'stream'){throw 'The open Moonlight process is not a stream for this VM; close its window first.'}
     if($PSBoundParameters.ContainsKey('Fps') -and -not $Reconnect -and (-not $savedMatches -or [int]$saved.fps -ne $fps)){throw 'Changing the frame rate of an open stream requires -Reconnect.'}
     if($savedMatches -and -not $Reconnect){$fps=[int]$saved.fps}
     if($savedMatches){$logPath=[string]$saved.logPath}
@@ -46,7 +64,7 @@ if($processes.Count) {
         if($legacy.Count){$logPath=$legacy[0].FullName}
     }
     $alreadyOpen=$true
-    if($Reconnect) {
+    if($Reconnect -or $process.MainWindowTitle -eq 'Moonlight') {
         $null=$process.CloseMainWindow()
         if(-not $process.WaitForExit(15000)){throw 'The matching Moonlight stream did not close cleanly.'}
         $process=$null;$alreadyOpen=$false;$logPath=''
@@ -82,10 +100,16 @@ $deadline=(Get-Date).AddSeconds(30)
 $receivingSince=$null
 do {
     $process.Refresh()
-    if($process.HasExited){throw "Moonlight exited while opening the stream; see $logPath"}
     if(-not $logPath){
         $logs=@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'Moonlight-*.log' -File|Where-Object {$_.CreationTimeUtc -ge $process.StartTime.ToUniversalTime().AddSeconds(-0.5)}|Sort-Object CreationTimeUtc)
         if($logs.Count){$logPath=$logs[0].FullName}
+    }
+    if($process.HasExited){
+        $record.logPath=$logPath;$record.streamWindowOpen=$false;$record.videoDeliveryVerified=$false
+        $record.streamState='exited';$record.exitCode=$process.ExitCode
+        $record|ConvertTo-Json|Set-Content -LiteralPath $activePath
+        $details=if($logPath){"see $logPath"}else{"no Moonlight log was created; diagnostic: $activePath"}
+        throw "Moonlight exited while opening the stream (exit $($process.ExitCode)); $details"
     }
     $log=if($logPath -and (Test-Path -LiteralPath $logPath)){Get-Content -LiteralPath $logPath -Raw}else{''}
     $evidence=Get-VmctlStreamEvidence -WindowTitle $process.MainWindowTitle -HostName $hosts[0].hostname -Log $log
@@ -115,3 +139,7 @@ if($PSBoundParameters.ContainsKey('Fps')){
 }
 $record|ConvertTo-Json|Set-Content -LiteralPath $activePath
 $record|ConvertTo-Json
+}finally{
+    if($lockTaken){$launchLock.ReleaseMutex()}
+    $launchLock.Dispose()
+}

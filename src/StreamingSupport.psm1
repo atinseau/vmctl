@@ -76,10 +76,18 @@ function Get-VmctlStreamEvidence {
     $failure=if($terminations.Count){$terminations[$terminations.Count-1].Value.Trim()}elseif($failures.Count){$failures[$failures.Count-1].Value.Trim()}else{''}
     [pscustomobject]@{windowMatches=$windowMatches;videoReceived=$videoReceived;decoderChosen=$decoderChosen;disconnected=($failures.Count -gt 0);failure=$failure;ready=($windowMatches -and $videoReceived -and $decoderChosen -and -not $failures.Count)}
 }
+function Get-VmctlMoonlightProcessRole {
+    param([string]$CommandLine,[Parameter(Mandatory)][string]$ServerUuid)
+    $command=[regex]::Match($CommandLine,'(?:^|\s)(stream|list|quit|pair)\s+"?([0-9a-f-]{36})"?(?:\s|$)',[Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if(-not $command.Success){return 'unknown'}
+    if($command.Groups[1].Value -ine 'stream'){return 'helper'}
+    if($command.Groups[2].Value -ieq $ServerUuid){return 'stream'}
+    return 'other-stream'
+}
 function Test-VmctlStreamingSessionFreshness {
     param([Parameter(Mandatory)][object]$Expires,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow)
     # ConvertFrom-Json may already return a DateTime. Parsing its localized
     # string can swap the month and day (for example 06/10 in French).
     $Now -lt [DateTimeOffset]$Expires
 }
-Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Test-VmctlStreamingSessionFreshness
+Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Get-VmctlMoonlightProcessRole,Test-VmctlStreamingSessionFreshness

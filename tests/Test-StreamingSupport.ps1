@@ -2,6 +2,7 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../src/StreamingSupport.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../src/Vmctl.psm1') -Force
 $fixture='Software\vmctl-tests\'+[guid]::NewGuid().ToString('N')
 $uuids=@([guid]::NewGuid().ToString(),[guid]::NewGuid().ToString(),[guid]::NewGuid().ToString())
 $passed=0
@@ -10,6 +11,25 @@ function Assert-That([bool]$Condition,[string]$Label) {
     $script:passed++; Write-Output "OK: $Label"
 }
 try {
+    $processUuid='f9b3a02d-eb6a-1802-ec96-446211423a0f'
+    Assert-That ((Get-VmctlMoonlightProcessRole ('"C:\Program Files\Moonlight Game Streaming\Moonlight.exe" list '+$processUuid) $processUuid) -eq 'helper') 'Moonlight list is a helper, never a stream'
+    Assert-That ((Get-VmctlMoonlightProcessRole ('Moonlight.exe quit '+$processUuid) $processUuid) -eq 'helper') 'Moonlight quit is a helper, never a stream'
+    Assert-That ((Get-VmctlMoonlightProcessRole ('Moonlight.exe stream "'+$processUuid+'" "Virtual Display"') $processUuid) -eq 'stream') 'Quoted UUID stream is identified'
+    Assert-That ((Get-VmctlMoonlightProcessRole ('Moonlight.exe stream '+$processUuid.ToUpper()+' Desktop --fps 60') $processUuid) -eq 'stream') 'Stream UUID matching is case insensitive'
+    Assert-That ((Get-VmctlMoonlightProcessRole ('Moonlight.exe stream '+[guid]::NewGuid().ToString()+' Desktop') $processUuid) -eq 'other-stream') 'Another VM stream is refused'
+    Assert-That ((Get-VmctlMoonlightProcessRole 'Moonlight.exe' $processUuid) -eq 'unknown') 'A bare launcher cannot be adopted as a VM stream'
+    $launchLock=[Threading.Mutex]::new($false,('Local\vmctl-moonlight-'+[Security.Principal.WindowsIdentity]::GetCurrent().User.Value))
+    $lockTaken=$false
+    try {
+        try{$lockTaken=$launchLock.WaitOne(0)}catch [Threading.AbandonedMutexException]{$lockTaken=$true}
+        if(-not $lockTaken){throw 'Wait for the ongoing streaming-open operation before running tests.'}
+        $worker=Join-Path $PSScriptRoot '../scripts/Open-StreamingHost.ps1'
+        $busy=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') @('-NoProfile','-File',$worker,'-Vm','fixture-no-vm','-VmName','fixture-no-vm') -TimeoutSeconds 15
+        Assert-That ($busy.ExitCode -ne 0 -and $busy.Stderr -match 'operation is already running') 'Concurrent open is blocked before reading any VM binding or calling Moonlight'
+    }finally{
+        if($lockTaken){$launchLock.ReleaseMutex()}
+        $launchLock.Dispose()
+    }
     $realLog="FFmpeg-based video decoder chosen`nReceived first video packet after 300 ms"
     Assert-That (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' $realLog).ready 'Window and real video reception prove readiness'
     Assert-That (-not (Get-VmctlStreamEvidence 'Moonlight' 'win-vm' $realLog).ready) 'Launcher window does not prove stream readiness'
