@@ -62,7 +62,7 @@ function Wait-GuestReady {
 }
 try {
     # Independent QSettings instances can overwrite each other's pairing cache.
-    $clients=@(Get-Process Moonlight -ErrorAction SilentlyContinue)
+    $clients=@(Get-Process Moonlight -ErrorAction SilentlyContinue | Where-Object {-not $_.HasExited})
     if($Open -and @($clients|Where-Object {$_.MainWindowTitle -like '* - Moonlight'}).Count) {
         # Resume an already opened matching stream without reinstalling or closing it.
         $openArguments=@('streaming-open','-Vm',$Vm)
@@ -77,7 +77,7 @@ try {
         $reopenMoonlight=$true
         foreach($client in $clients){$null=$client.CloseMainWindow()}
         $deadline=(Get-Date).AddSeconds(10)
-        do { Start-Sleep -Milliseconds 250; $clients=@(Get-Process Moonlight -ErrorAction SilentlyContinue) } while($clients.Count -and (Get-Date) -lt $deadline)
+        do { Start-Sleep -Milliseconds 250; $clients=@(Get-Process Moonlight -ErrorAction SilentlyContinue | Where-Object {-not $_.HasExited}) } while($clients.Count -and (Get-Date) -lt $deadline)
         if($clients.Count){throw 'Close all Moonlight processes before installation; its saved hosts cannot be updated safely.'}
     }
     Save-State 'host-preparation' 'Installing Moonlight and checking Hyper-V GPU capabilities.'
@@ -158,8 +158,10 @@ try {
         $action='initialize'
     }
     $apiRequest=@{action=$action;username=$apiCredential.UserName;password=$apiCredential.GetNetworkCredential().Password;expectedVersion=$packages.apollo.version}
-    $apiResult=Invoke-GuestApi $apiRequest
+    # Preserve a new secret before the remote mutation: a transport failure
+    # after password creation must not make the Apollo account unrecoverable.
     if ($action -eq 'initialize') { $apiCredential | Export-Clixml -LiteralPath $secretPath }
+    $apiResult=Invoke-GuestApi $apiRequest
     $apiResult | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-apollo-api.json') -Encoding utf8
     $gpuConfigured=$false
     $guestNvidia=@($guestInfo.gpu | Where-Object { $_.Name -match '^NVIDIA ' -and $_.ConfigManagerErrorCode -eq 0 })
@@ -193,12 +195,26 @@ try {
             if(-not $certificateSaved){throw 'Moonlight did not persist its paired server certificate.'}
             if(-not $pairProcess.HasExited){$null=$pairProcess.CloseMainWindow(); $null=$pairProcess.WaitForExit(5000)}
         } finally { if (-not $pairProcess.HasExited) { $pairProcess.Kill() }; $pairProcess.Dispose() }
-        $listResult=Invoke-VmctlProcess $moonlight @('list',$address) -TimeoutSeconds 45
     }
-    $listResult | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-moonlight-apps.json') -Encoding utf8
-    if ($listResult.ExitCode -ne 0) { throw "Moonlight pairing/app listing failed: $($listResult.Stderr)" }
     $pairedHosts=@(Get-VmctlMoonlightHost -Address $address)
     if($pairedHosts.Count -ne 1){throw 'A unique persisted Moonlight host was not found after pairing.'}
+    # Qt can persist a certificate containing only PEM delimiters after the
+    # pairing helper exits. Recover the public certificate over authenticated
+    # PowerShell Direct to this exact VM, rather than accepting an unpinned API.
+    $identityScript='$state=Get-Content "C:\Program Files\Apollo\config\sunshine_state.json" -Raw|ConvertFrom-Json; @{uuid=$state.root.uniqueid;certificate=[IO.File]::ReadAllText("C:\Program Files\Apollo\config\credentials\cacert.pem")}|ConvertTo-Json; $global:LASTEXITCODE=0'
+    $guestIdentity=(Invoke-Cli @('exec','-Vm',$Vm,'-CredentialFile',$CredentialFile,'-Command',$identityScript))|ConvertFrom-Json
+    if($guestIdentity.uuid -ine $pairedHosts[0].uuid){throw 'Apollo identity differs from the paired Moonlight host.'}
+    $profileKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey(('Software\Moonlight Game Streaming Project\Moonlight\hosts\'+$pairedHosts[0].key),$true)
+    try{
+        if(-not $profileKey){throw 'Paired Moonlight profile disappeared before certificate verification.'}
+        if(Test-VmctlMoonlightCertificateRepair -CachedPem $profileKey.GetValue('srvcert','') -GuestPem $guestIdentity.certificate){
+            $profileKey.SetValue('srvcert',[string]$guestIdentity.certificate,[Microsoft.Win32.RegistryValueKind]::String)
+        }
+    }finally{if($profileKey){$profileKey.Dispose()}}
+    # Verify with a fresh CLI process only after the persisted pin is valid.
+    $listResult=Invoke-VmctlProcess $moonlight @('list',$address) -TimeoutSeconds 45
+    $listResult | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-moonlight-apps.json') -Encoding utf8
+    if ($listResult.ExitCode -ne 0) { throw "Moonlight pairing/app listing failed: $($listResult.Stderr)" }
     $bindingDirectory=Join-Path (Get-VmctlDataRoot) 'streaming-bindings'
     $null=New-Item -ItemType Directory -Path $bindingDirectory -Force
     @{vm=$Vm;vmName=$target.vmName;vmId=$gpuInfo.vmId;serverUuid=$pairedHosts[0].uuid} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bindingDirectory "$Vm.json") -Encoding utf8

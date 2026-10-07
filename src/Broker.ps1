@@ -82,7 +82,7 @@ function Invoke-VmctlBrokerOperation {
     $timeout=[int]$Request.timeoutSeconds
     if($timeout -lt 1 -or $timeout -gt 86400){throw 'Delai agent invalide.'}
     if($Request.operation -ne 'direct'){
-        $allowed=switch($Request.operation){hyperv {@('Action','Name','RemoveCheckpoints','DisableAutomaticCheckpoints')} gpu {@('Mode','GpuName','Percent')} console {@('Vm','Action','OutFile','Frame','Text','Keys','X','Y','ToX','ToY','ButtonIndex','Count','Delta','MaxFrameAgeSeconds')} streaming-setup {@('Vm','Config','ReportDirectory','CredentialFile','UserName','Open')}}
+        $allowed=switch($Request.operation){hyperv {@('Action','Name','Destination','SnapshotName','RemoveCheckpoints','DisableAutomaticCheckpoints')} gpu {@('Mode','GpuName','Percent')} console {@('Vm','Action','OutFile','Frame','Text','Keys','X','Y','ToX','ToY','ButtonIndex','Count','Delta','MaxFrameAgeSeconds')} streaming-setup {@('Vm','Config','ReportDirectory','CredentialFile','UserName','Open')}}
         foreach($entry in $Request.parameters.GetEnumerator()){if($entry.Key -notin $allowed){throw "Parametre agent interdit : $($entry.Key)"}}
     }
     switch($Request.operation){

@@ -1,13 +1,17 @@
 #requires -Version 7.2
 function Invoke-VmctlHyperV {
-    param([hashtable]$Target, [ValidateSet('checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'network')][string]$Action,
-        [string]$Name, [switch]$RemoveCheckpoints, [switch]$DisableAutomaticCheckpoints, [int]$TimeoutSeconds = 120)
+    param([hashtable]$Target, [ValidateSet('checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'network', 'clone')][string]$Action,
+        [string]$Name,[string]$Destination,[string]$SnapshotName, [switch]$RemoveCheckpoints, [switch]$DisableAutomaticCheckpoints, [int]$TimeoutSeconds = 120)
     if (-not $IsWindows -or $Target.hypervisor -ne 'hyperv' -or -not $Target.vmName) {
         throw 'Cette action exige un hote Windows et une cible avec hypervisor=hyperv et vmName.'
     }
     $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if((Test-VmctlBrokerInstalled) -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        return Invoke-VmctlBroker @{operation='hyperv';target=$Target;parameters=@{Action=$Action;Name=$Name;RemoveCheckpoints=[bool]$RemoveCheckpoints;DisableAutomaticCheckpoints=[bool]$DisableAutomaticCheckpoints}} -TimeoutSeconds $TimeoutSeconds
+        return Invoke-VmctlBroker @{operation='hyperv';target=$Target;parameters=@{Action=$Action;Name=$Name;Destination=$Destination;SnapshotName=$SnapshotName;RemoveCheckpoints=[bool]$RemoveCheckpoints;DisableAutomaticCheckpoints=[bool]$DisableAutomaticCheckpoints}} -TimeoutSeconds $TimeoutSeconds
+    }
+    if($Action -eq 'clone'){
+        $worker=Join-Path $PSScriptRoot '../scripts/Copy-HyperVCheckpoint.ps1'
+        return Invoke-VmctlProcess (Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe') @('-NoProfile','-NonInteractive','-File',$worker,'-SourceName',$Target.vmName,'-SourceId',$Target.vmId,'-CloneName',$Name,'-Destination',$Destination,'-SnapshotName',$SnapshotName) -TimeoutSeconds $TimeoutSeconds
     }
     $vmName = [string]$Target.vmName
     $encodedVm = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($vmName))

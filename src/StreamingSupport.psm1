@@ -32,7 +32,7 @@ function Set-VmctlRegistrySnapshot {
 }
 function Remove-VmctlMoonlightHost {
     param([Parameter(Mandatory)][string]$ServerUuid,[string]$RegistrySubKey='Software\Moonlight Game Streaming Project\Moonlight')
-    if($RegistrySubKey -ieq 'Software\Moonlight Game Streaming Project\Moonlight' -and (Get-Process Moonlight -ErrorAction SilentlyContinue)){throw 'Close Moonlight before modifying its saved hosts.'}
+    if($RegistrySubKey -ieq 'Software\Moonlight Game Streaming Project\Moonlight' -and (Get-Process Moonlight -ErrorAction SilentlyContinue | Where-Object {-not $_.HasExited})){throw 'Close Moonlight before modifying its saved hosts.'}
     $root=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($RegistrySubKey,$true)
     if(-not $root){return [pscustomobject]@{removed=0;uuid=$ServerUuid}}
     $removed=0
@@ -201,4 +201,26 @@ function Invoke-VmctlStreamingStatusRead {
     $details=if($result){ConvertTo-VmctlStreamingErrorText $result.Stderr}else{'Aucune requête terminée.'}
     [pscustomobject]@{ExitCode=124;Stdout='';Stderr="Apollo ne répond pas après plusieurs tentatives (maximum ${BudgetSeconds}s).`nDernière erreur : $details"}
 }
-Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Get-VmctlMoonlightProcessRole,Test-VmctlStreamingSessionFreshness,Get-VmctlPrimaryMonitor,Set-VmctlStreamOnPrimaryMonitor,New-VmctlStreamingDisplayPlan,Get-VmctlCapturedResolution,Invoke-VmctlStreamingStatusRead,ConvertTo-VmctlStreamingErrorText,Select-VmctlApolloAddress
+function Test-VmctlMoonlightCertificateRepair {
+    # GuestPem must come from authenticated PowerShell Direct to the bound VM.
+    # A valid existing pin is never silently replaced.
+    param([AllowNull()][AllowEmptyString()][object]$CachedPem,[Parameter(Mandatory)][string]$GuestPem)
+    $CachedPem=if($CachedPem -is [byte[]]){[Text.Encoding]::UTF8.GetString($CachedPem)}else{[string]$CachedPem}
+    $guestCertificate=[Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPem($GuestPem)
+    $cachedCertificate=$null
+    try {
+        if($CachedPem.StartsWith('@ByteArray(') -and $CachedPem.EndsWith(')')){$CachedPem=$CachedPem.Substring(11,$CachedPem.Length-12)}
+        $CachedPem=$CachedPem.Replace('\\n',"`n").Replace('\n',"`n").Replace('\\r',"`r").Replace('\r',"`r")
+        try {$cachedCertificate=[Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPem($CachedPem)}
+        catch [ArgumentException] {} catch [Security.Cryptography.CryptographicException] {}
+        if(-not $cachedCertificate){return $true}
+        if($cachedCertificate.GetCertHashString() -ne $guestCertificate.GetCertHashString()){
+            throw 'Paired certificate differs from the authenticated guest; no replacement performed.'
+        }
+        return $false
+    } finally {
+        if($cachedCertificate){$cachedCertificate.Dispose()}
+        $guestCertificate.Dispose()
+    }
+}
+Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Get-VmctlMoonlightProcessRole,Test-VmctlStreamingSessionFreshness,Get-VmctlPrimaryMonitor,Set-VmctlStreamOnPrimaryMonitor,New-VmctlStreamingDisplayPlan,Get-VmctlCapturedResolution,Invoke-VmctlStreamingStatusRead,ConvertTo-VmctlStreamingErrorText,Select-VmctlApolloAddress,Test-VmctlMoonlightCertificateRepair

@@ -11,6 +11,28 @@ function Assert-That([bool]$Condition,[string]$Label) {
     $script:passed++; Write-Output "OK: $Label"
 }
 try {
+    $rsa=[Security.Cryptography.RSA]::Create(2048)
+    $request=[Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=vmctl-test',$rsa,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $cert=$request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-1),[DateTimeOffset]::UtcNow.AddHours(1))
+    $other=$request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-1),[DateTimeOffset]::UtcNow.AddHours(2))
+    try {
+        $pem=$cert.ExportCertificatePem()
+        Assert-That (Test-VmctlMoonlightCertificateRepair -CachedPem '' -GuestPem $pem) 'Missing pairing certificate can be recovered from the authenticated guest'
+        Assert-That (Test-VmctlMoonlightCertificateRepair -CachedPem '@ByteArray(-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n)' -GuestPem $pem) 'Empty Qt PEM delimiters do not count as a valid pairing pin'
+        Assert-That (-not (Test-VmctlMoonlightCertificateRepair -CachedPem $pem -GuestPem $pem)) 'An existing matching pin is preserved'
+        $qtPem='@ByteArray('+$pem.Replace("`n",'\n')+')'
+        Assert-That (-not (Test-VmctlMoonlightCertificateRepair -CachedPem $qtPem -GuestPem $pem)) 'A valid Qt-escaped PEM is preserved'
+        Assert-That (-not (Test-VmctlMoonlightCertificateRepair -CachedPem ([Text.Encoding]::UTF8.GetBytes($pem)) -GuestPem $pem)) 'A valid binary registry PEM is preserved'
+        $rejected=$false
+        try {$null=Test-VmctlMoonlightCertificateRepair -CachedPem $other.ExportCertificatePem() -GuestPem $pem} catch {$rejected=$true}
+        Assert-That $rejected 'A different valid server certificate is rejected'
+        $rejected=$false
+        try {$null=Test-VmctlMoonlightCertificateRepair -CachedPem ([Text.Encoding]::UTF8.GetBytes($other.ExportCertificatePem())) -GuestPem $pem} catch {$rejected=$true}
+        Assert-That $rejected 'A different binary registry certificate is also rejected'
+        $rejected=$false
+        try {$null=Test-VmctlMoonlightCertificateRepair -CachedPem '' -GuestPem 'invalid'} catch {$rejected=$true}
+        Assert-That $rejected 'An invalid authenticated guest certificate cannot repair a pin'
+    } finally {$cert.Dispose();$other.Dispose();$rsa.Dispose()}
     Assert-That ((Select-VmctlApolloAddress -GuestAddresses @('172.17.162.12','fe80::123','127.0.0.1') -CachedAddress '172.23.240.168') -eq '172.17.162.12') 'A stale Moonlight address is replaced by the current Hyper-V guest address'
     Assert-That ((Select-VmctlApolloAddress -GuestAddresses @('10.0.0.2','172.17.162.12') -CachedAddress '172.17.162.12') -eq '172.17.162.12') 'A current cached address is preferred on a guest with multiple interfaces'
     Assert-That ((Select-VmctlApolloAddress -GuestAddresses @('fe80::123','169.254.0.1') -CachedAddress '172.17.162.12') -eq '172.17.162.12') 'Missing integration-service IPv4 falls back to the paired cache'
