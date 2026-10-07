@@ -199,8 +199,14 @@ if($Application -eq 'Virtual Display'){
     $capture=Get-VmctlCapturedResolution -Lines $status.diagnostics.log -NotBefore $process.StartTime
     $record.guestResolution=$capture
     $record.guestResolutionVerified=($capture -eq "${width}x${height}")
+    $record.displayApiAccess=Get-VmctlDisplayApiAccess -Lines $status.diagnostics.displayApiLog -NotBefore $process.StartTime
     $record|ConvertTo-Json|Set-Content -LiteralPath $activePath
-    if(-not $record.guestResolutionVerified){throw "Guest desktop capture is '$capture', expected '${width}x${height}'. The stream is scaled; the requested resolution is not verified."}
+    if(-not $record.guestResolutionVerified){
+        if($record.displayApiAccess -eq 'refused'){
+            throw "Windows refuse le changement de résolution dans ${VmName} : capture $capture, demande ${width}x${height}. Ouvre ou déverrouille la session Windows dans la VM, puis relance le flux."
+        }
+        throw "L'affichage de ${VmName} reste en $capture au lieu de ${width}x${height}. Le flux est agrandi ; la résolution demandée n'est pas vérifiée."
+    }
 }
 if($PSBoundParameters.ContainsKey('Fps')){
     # Store this VM's cadence after successful startup; other Moonlight hosts

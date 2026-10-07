@@ -72,6 +72,12 @@ try {
     $plain=ConvertTo-VmctlStreamingErrorText "`e[31;1mL’API Apollo ne répond pas.`e[0m`r`n"
     Assert-That ($plain -eq "L’API Apollo ne répond pas.") 'Popup errors remove ANSI sequences and retain French text'
     $captureLines=@('[2026-10-06 19:00:00.000]: Info: Desktop resolution [1920x1080]', '[2026-10-06 19:01:01.123]: Info: Desktop resolution [2560x1440]')
+    $displayDenied='[2026-10-06 19:01:01.123]: Info: Trying to apply display device settings. API is available: false'
+    $displayAvailable='[2026-10-06 19:01:02.123]: Info: Trying to apply display device settings. API is available: true'
+    Assert-That ((Get-VmctlDisplayApiAccess -Lines @($displayDenied) -NotBefore ([datetime]'2026-10-06T19:01:00')) -eq 'refused') 'Current Windows display API refusal explains a resolution mismatch'
+    Assert-That ((Get-VmctlDisplayApiAccess -Lines @($displayDenied) -NotBefore ([datetime]'2026-10-06T19:02:00')) -eq 'unknown') 'A previous session refusal cannot explain the current stream'
+    Assert-That ((Get-VmctlDisplayApiAccess -Lines @($displayDenied,$displayAvailable) -NotBefore ([datetime]'2026-10-06T19:01:00')) -eq 'available') 'Restored API access supersedes an earlier refusal'
+    Assert-That ((Get-VmctlDisplayApiAccess -Lines @('API is available: false') -NotBefore ([datetime]'2026-10-06T19:01:00')) -eq 'unknown') 'Undated API availability cannot diagnose a stream'
     Assert-That ((Get-VmctlCapturedResolution -Lines $captureLines -NotBefore ([datetime]'2026-10-06T19:01:00')) -eq '2560x1440') 'Guest verification reads the capture dimensions after stream startup'
     Assert-That ((Get-VmctlCapturedResolution -Lines $captureLines -NotBefore ([datetime]'2026-10-06T19:02:00')) -eq '') 'Old capture evidence cannot verify a new stream'
     Assert-That ((Get-VmctlCapturedResolution -Lines @('Capture size : 2560x1440') -NotBefore ([datetime]'2026-10-06T19:01:00')) -eq '') 'Undated capture dimensions cannot verify a new stream'

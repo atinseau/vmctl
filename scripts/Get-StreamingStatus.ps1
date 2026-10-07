@@ -222,6 +222,7 @@ try {
         $diagnostic=@{
             videoSettings=($settings | Select-Object adapter_name,output_name,capture,encoder,headless_mode,nvenc_preset,nvenc_twopass,nvenc_realtime_hags,nvenc_latency_over_power,dd_configuration_option,dd_resolution_option,dd_refresh_rate_option,hevc_mode,av1_mode,min_log_level,vdisplayStatus)
             displayLog=@($safeLines | Where-Object { $_ -match 'Error:|Warning:|CLIENT |Virtual Display|virtual display|Winlogon|SESSION|session|display_device|\bprimary\b|configuration|optimization|Desktop switch|display name|Display:' } | Select-Object -Last 100)
+            displayApiLog=@($safeLines | Where-Object { $_ -match 'Trying to apply display device settings\. API is available:' } | Select-Object -Last 10)
             log=@($safeLines | Where-Object { $_ -match 'Error:|Warning:|Device Description|Feature Level|Capture size|Desktop resolution|Display refresh rate|Requested frame rate|Creating encoder|NvEnc:|CLIENT |Virtual Display|virtual display|desktop switch|Winlogon|SESSION|session' } | Select-Object -Last 90)
             debugLog=@($safeLines | Where-Object { $_ -match 'Debug:' -and $_ -match 'captur|frame|desktop|timeout|DXGI|D3D|duplicat|encode|switch|display|is_user_session_locked' } | Select-Object -Last 80)
             sessionLockLog=@($safeLines | Where-Object { $_ -match 'is_user_session_locked:' } | Select-Object -Last 5)

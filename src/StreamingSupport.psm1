@@ -105,6 +105,17 @@ function Get-VmctlCapturedResolution {
     }
     $latest
 }
+function Get-VmctlDisplayApiAccess {
+    param([string[]]$Lines,[datetime]$NotBefore)
+    $latest='unknown'
+    foreach($line in $Lines){
+        $match=[regex]::Match($line,'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\].*Trying to apply display device settings\. API is available: (true|false)\b')
+        if($match.Success -and [datetime]::ParseExact($match.Groups[1].Value,'yyyy-MM-dd HH:mm:ss.fff',[Globalization.CultureInfo]::InvariantCulture) -ge $NotBefore){
+            $latest=if($match.Groups[2].Value -eq 'true'){'available'}else{'refused'}
+        }
+    }
+    $latest
+}
 function Initialize-VmctlPrimaryMonitorApi {
     if ('VmctlPrimaryMonitor' -as [type]) { return }
     Add-Type -TypeDefinition @'
@@ -223,4 +234,4 @@ function Test-VmctlMoonlightCertificateRepair {
         $guestCertificate.Dispose()
     }
 }
-Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Get-VmctlMoonlightProcessRole,Test-VmctlStreamingSessionFreshness,Get-VmctlPrimaryMonitor,Set-VmctlStreamOnPrimaryMonitor,New-VmctlStreamingDisplayPlan,Get-VmctlCapturedResolution,Invoke-VmctlStreamingStatusRead,ConvertTo-VmctlStreamingErrorText,Select-VmctlApolloAddress,Test-VmctlMoonlightCertificateRepair
+Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Get-VmctlMoonlightProcessRole,Test-VmctlStreamingSessionFreshness,Get-VmctlPrimaryMonitor,Set-VmctlStreamOnPrimaryMonitor,New-VmctlStreamingDisplayPlan,Get-VmctlCapturedResolution,Invoke-VmctlStreamingStatusRead,ConvertTo-VmctlStreamingErrorText,Select-VmctlApolloAddress,Test-VmctlMoonlightCertificateRepair,Get-VmctlDisplayApiAccess
