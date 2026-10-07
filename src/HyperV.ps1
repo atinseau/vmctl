@@ -5,6 +5,10 @@ function Invoke-VmctlHyperV {
     if (-not $IsWindows -or $Target.hypervisor -ne 'hyperv' -or -not $Target.vmName) {
         throw 'Cette action exige un hote Windows et une cible avec hypervisor=hyperv et vmName.'
     }
+    $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if((Test-VmctlBrokerInstalled) -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        return Invoke-VmctlBroker @{operation='hyperv';target=$Target;parameters=@{Action=$Action;Name=$Name;RemoveCheckpoints=[bool]$RemoveCheckpoints;DisableAutomaticCheckpoints=[bool]$DisableAutomaticCheckpoints}} -TimeoutSeconds $TimeoutSeconds
+    }
     $vmName = [string]$Target.vmName
     $encodedVm = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($vmName))
     $encodedName = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$Name))

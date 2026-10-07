@@ -1,9 +1,9 @@
 #requires -Version 7.2
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)][ValidateSet('help', 'list', 'shortcut', 'register', 'exec', 'run', 'upload', 'doctor', 'checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'gpu-setup', 'gpu-status', 'gpu-sync', 'gpu-remove', 'gpu-task-test', 'streaming-install', 'streaming-open', 'streaming-access', 'streaming-forget', 'streaming-status', 'streaming-display-fix', 'streaming-display-restore', 'streaming-video-test', 'streaming-video-restore', 'capabilities', 'screenshot', 'move', 'click', 'type', 'key', 'scroll', 'drag')]
+    [Parameter(Position = 0)][ValidateSet('help', 'list', 'privileged', 'shortcut', 'register', 'exec', 'run', 'upload', 'doctor', 'checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'gpu-setup', 'gpu-status', 'gpu-sync', 'gpu-remove', 'gpu-task-test', 'streaming-install', 'streaming-open', 'streaming-access', 'streaming-forget', 'streaming-status', 'streaming-display-fix', 'streaming-display-restore', 'streaming-video-test', 'streaming-video-restore', 'capabilities', 'screenshot', 'move', 'click', 'type', 'key', 'scroll', 'drag')]
     [string]$Action = 'help',
-    [Parameter(Position=1)][ValidateSet('install','uninstall')][string]$ShortcutAction,
+    [Parameter(Position=1)][ValidateSet('install','uninstall','enable','disable','status')][string]$ShortcutAction,
     [string]$Vm, [string]$Command, [string]$File, [string]$Source, [string]$Destination,
     [Alias('-name')][string]$Name, [string]$HostName, [string]$UserName,
     [ValidateSet('windows', 'linux')][string]$Os,
@@ -53,6 +53,7 @@ try {
         @'
 vmctl : PowerShell Direct (Hyper-V Windows local), SSH et console optionnelle
 
+  vmctl privileged enable|disable|status
   vmctl list
   vmctl shortcut install --name "VM - Fenetre" [--mode windowed|fullscreen]
   vmctl shortcut uninstall --name "VM - Fenetre"
@@ -130,6 +131,11 @@ Les autres codes sont ceux du programme distant (ou de scp).
 '@
         exit 0
     }
+    if ($Action -eq 'privileged') {
+        if($ShortcutAction -notin @('enable','disable','status')){throw 'Usage: vmctl privileged enable|disable|status'}
+        Set-VmctlPrivilegedMode -Mode $ShortcutAction | ConvertTo-Json -Depth 5
+        exit 0
+    }
     if (-not $Config) { $Config = Get-VmctlConfigPath }
     if ($RemoveCheckpoints -and $Action -ne 'compact') { throw '-RemoveCheckpoints exige compact.' }
     if ($DisableAutomaticCheckpoints -and $Action -notin @('compact','checkpoint')) { throw '-DisableAutomaticCheckpoints exige compact ou checkpoint.' }
@@ -150,7 +156,7 @@ Les autres codes sont ceux du programme distant (ou de scp).
     if ($PSBoundParameters.ContainsKey('Mode') -and $Action -notin @('streaming-open','shortcut')) { throw '-Mode is supported only with streaming-open or shortcut.' }
     if ($ShortcutAction -and $Action -ne 'shortcut') { throw 'install/uninstall requires shortcut.' }
     if ($Action -eq 'shortcut') {
-        if(-not $ShortcutAction -or -not $Name){throw 'Usage: vmctl shortcut install|uninstall --name NAME [--mode windowed|fullscreen]'}
+        if($ShortcutAction -notin @('install','uninstall') -or -not $Name){throw 'Usage: vmctl shortcut install|uninstall --name NAME [--mode windowed|fullscreen]'}
         Import-Module (Join-Path $PSScriptRoot 'src/ShortcutSupport.psm1') -Force
         $shortcutArgs=@{Action=$ShortcutAction;Name=$Name;Mode=$Mode;Runtime=(Join-Path $PSHOME 'pwsh.exe');PickerScript=(Join-Path $PSScriptRoot 'scripts/Open-StreamingPicker.ps1')}
         if($PSBoundParameters.ContainsKey('Config')){$shortcutArgs.Config=[IO.Path]::GetFullPath($Config)}
@@ -199,7 +205,7 @@ Les autres codes sont ceux du programme distant (ou de scp).
     if (($Credential -or $CredentialFile) -and (Get-VmctlTransport $target) -ne 'psdirect') { throw 'Credential/CredentialFile sont reserves a PowerShell Direct.' }
     $authentication = @{Credential=$Credential;CredentialFile=$CredentialFile}
     if ($Action -eq 'streaming-access') {
-        $secretPath=Join-Path $env:LOCALAPPDATA "vmctl\credentials\apollo-$Vm.clixml"
+        $secretPath=Join-Path (Get-VmctlDataRoot) "credentials\apollo-$Vm.clixml"
         if (-not (Test-Path -LiteralPath $secretPath)) { throw 'Acces Apollo chiffre introuvable pour cette VM et cet utilisateur.' }
         $scriptPath=Join-Path $PSScriptRoot 'scripts\Show-ApolloAccess.ps1'
         $code="& '"+$scriptPath.Replace("'","''")+"' -Vm '"+$Vm.Replace("'","''")+"'"
@@ -213,14 +219,14 @@ Les autres codes sont ceux du programme distant (ou de scp).
         if ($target.os -ne 'windows' -or $target.hypervisor -ne 'hyperv' -or (Get-VmctlTransport $target) -ne 'psdirect') { throw 'streaming-install exige une VM Windows Hyper-V locale utilisant Direct.' }
         if ($Credential) { throw 'streaming-install accepte -CredentialFile ; sinon une fenetre de saisie est ouverte.' }
         Import-Module (Join-Path $PSScriptRoot 'src/StreamingSupport.psm1') -Force
-        $sessionPath=Join-Path $env:LOCALAPPDATA "vmctl\streaming-sessions\$Vm.json"
+        $sessionPath=Join-Path (Get-VmctlDataRoot) "streaming-sessions\$Vm.json"
         # Recover a live older setup referenced by an explicit report directory.
         # Early sessions did not yet keep a per-directory copy of their metadata.
         if($ReportDirectory -and (Test-Path -LiteralPath (Join-Path $ReportDirectory 'streaming-status.json'))) {
             $previous=Get-Content -LiteralPath (Join-Path $ReportDirectory 'streaming-status.json') -Raw|ConvertFrom-Json
             $priorProcess=Get-Process -Id $previous.pid -ErrorAction SilentlyContinue
             if($previous.vm -eq $Vm -and $previous.state -eq 'failed' -and $priorProcess -and $priorProcess.ProcessName -eq 'pwsh') {
-                $folders=@(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'vmctl\work') -Directory -Filter 'setup-session-*'|Where-Object {
+                $folders=@(Get-ChildItem -LiteralPath (Join-Path (Get-VmctlDataRoot) 'work') -Directory -Filter 'setup-session-*'|Where-Object {
                     $_.Name -match '^setup-session-[a-f0-9]{32}$' -and [Math]::Abs(($_.CreationTimeUtc-$priorProcess.StartTime.ToUniversalTime()).TotalSeconds) -lt 2 -and (Test-Path -LiteralPath (Join-Path $_.FullName 'guest-credential.clixml'))
                 })
                 if($folders.Count -eq 1 -and $target.ContainsKey('user')) {
@@ -246,8 +252,9 @@ Les autres codes sont ceux du programme distant (ou de scp).
                 exit 0
             }
         }
-        if (-not $ReportDirectory) { $ReportDirectory=Join-Path $env:LOCALAPPDATA "vmctl\reports\streaming\$Vm" }
+        if (-not $ReportDirectory) { $ReportDirectory=Join-Path (Get-VmctlDataRoot) "reports\streaming\$Vm" }
         $recipeArgs=@{Vm=$Vm;Config=[IO.Path]::GetFullPath($Config);ReportDirectory=[IO.Path]::GetFullPath($ReportDirectory)}
+        if(-not $CredentialFile -and $target.ContainsKey('credentialFile')){$CredentialFile=[string]$target.credentialFile}
         if($Open){$recipeArgs.Open=$true}
         if ($CredentialFile) { $recipeArgs.CredentialFile=[IO.Path]::GetFullPath($CredentialFile) }
         if ($UserName) { $recipeArgs.UserName=$UserName }
@@ -255,6 +262,10 @@ Les autres codes sont ceux du programme distant (ou de scp).
         $principal=[Security.Principal.WindowsPrincipal]::new($identity)
         if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
             & (Join-Path $PSScriptRoot 'scripts\Start-StreamingSession.ps1') @recipeArgs
+        } elseif(Test-VmctlBrokerInstalled) {
+            $brokerResult=Invoke-VmctlBroker @{operation='streaming-setup';target=$target;parameters=$recipeArgs}
+            if($brokerResult.ExitCode -ne 0){throw $brokerResult.Stderr}
+            [Console]::Out.WriteLine($brokerResult.Stdout)
         } else {
             $literalArgs=@($recipeArgs.GetEnumerator() | ForEach-Object { if($_.Value -is [bool]){'-'+$_.Key}else{'-'+$_.Key+" '"+$_.Value.Replace("'","''")+"'"} })
             $recipePath=(Join-Path $PSScriptRoot 'scripts\Start-StreamingSession.ps1').Replace("'","''")

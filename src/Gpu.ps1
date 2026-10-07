@@ -4,6 +4,10 @@ function Invoke-VmctlGpu {
         [string]$GpuName='NVIDIA GeForce RTX 4090',[ValidateRange(1,100)][int]$Percent=25,
         [switch]$Elevate,[int]$TimeoutSeconds=900)
     if (-not $IsWindows -or $Target.hypervisor -ne 'hyperv' -or $Target.os -ne 'windows') { throw 'GPU automation requires a local Hyper-V Windows target.' }
+    $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if((Test-VmctlBrokerInstalled) -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        return Invoke-VmctlBroker @{operation='gpu';target=$Target;parameters=@{Mode=$Mode;GpuName=$GpuName;Percent=$Percent}} -TimeoutSeconds $TimeoutSeconds
+    }
     $worker=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\Invoke-GpuWorker.ps1'
     $folder=Join-Path (Get-VmctlDataRoot) 'work\gpu'
     $null=New-Item -ItemType Directory -Path $folder -Force

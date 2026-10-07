@@ -22,6 +22,9 @@ function Invoke-VmctlConsole {
     if ($Action -eq 'scroll' -and $Delta -eq 0) { throw 'scroll exige -Delta non nul (exemple -120).' }
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     $admin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if(-not $admin -and (Test-VmctlBrokerInstalled)) {
+        return Invoke-VmctlBroker @{operation='console';target=$Target;parameters=@{Vm=$Vm;Action=$Action;OutFile=$OutFile;Frame=$Frame;Text=$Text;Keys=$Keys;X=$X;Y=$Y;ToX=$ToX;ToY=$ToY;ButtonIndex=$ButtonIndex;Count=$Count;Delta=$Delta;MaxFrameAgeSeconds=$MaxFrameAgeSeconds}} -TimeoutSeconds $TimeoutSeconds
+    }
     if (-not $admin -and -not $Elevate) { throw 'La console Hyper-V exige les droits administrateur. Utilisez un terminal eleve ou ajoutez -Elevate (UAC).' }
     $vmId = if ($Target.ContainsKey('vmId')) { ([Guid]::Parse($Target.vmId)).ToString() } else { '' }
     $taskId = [Guid]::NewGuid().ToString('N')

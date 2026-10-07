@@ -1,6 +1,34 @@
 [Accueil](../README.md) · [Architecture](architecture.md)
 
+## Mode privilegie Windows
+
+```powershell
+vmctl privileged enable
+vmctl privileged status
+vmctl privileged disable
+```
+
+La premiere activation installe une tache Windows elevee pour le compte courant et exige une seule validation UAC. Ensuite, les commandes Hyper-V, GPU, console, PowerShell Direct et l'installation streaming utilisent automatiquement cet agent depuis un terminal normal, sans `-Elevate`. Aucun compte supplementaire ni mot de passe Windows de l'hote n'est cree/enregistre. SSH et l'ouverture habituelle de Moonlight continuent dans la session normale.
+
+Le depot est la seule source de code : la tache pointe vers `scripts/Start-AdminBroker.ps1`, et l'agent recharge `src/Vmctl.psm1` depuis ce depot pour chaque operation. Il n'y a pas de copie installee du code. Activer ce mode autorise explicitement ce depot **et son runtime PowerShell** a executer du code avec les droits administrateur de l'hote. Les editions locales prennent donc effet avec ces droits. Garder le chemin du depot et du runtime stables ; les changements du serveur lui-meme exigent `disable`, attendre sa fermeture, puis `enable`.
+
+L'acces a l'agent passe par un pipe Windows local reserve au meme utilisateur. Son PID et sa date de demarrage sont verifies contre un fichier protege. Le protocole accepte uniquement les operations vmctl prevues, pas une commande shell sur l'hote. Les demandes et identifiants ne sont pas journalises. Ce droit est accorde au compte Windows ; vmctl ne peut pas verifier le reglage « acces complet » d'une conversation Codex.
+
+`disable` bloque les nouvelles demandes et ferme l'agent apres la fin de toute operation en cours. La desactivation persiste aux connexions Windows suivantes. La tache reste installee pour que `enable` puisse la relancer sans UAC. Hors de ce mode, les exigences administrateur habituelles s'appliquent. Un resultat inconnu/timeout n'est jamais rejoue automatiquement.
+
+Une cible Direct peut contenir `credentialFile`, chemin d'un PSCredential DPAPI exporte par ce meme utilisateur Windows. Les options explicites `-Credential` et `-CredentialFile` restent prioritaires. Cela evite de redemander le mot de passe invite a chaque commande ; ce fichier n'accorde aucun droit supplementaire sur l'hote.
+
 ## Transport adapte a la cible
+
+`vmctl` gere plusieurs VM. Chaque operation ciblee exige `-Vm ALIAS` ; aucune VM n'est choisie implicitement. `vmctl list` affiche les alias disponibles et `vmctl register -Vm ALIAS` ajoute une cible. `-HyperVName NOM` permet de distinguer l'alias du nom Hyper-V. Les raccourcis streaming relisent cette configuration et proposent toutes les cibles Windows Hyper-V compatibles.
+
+```powershell
+vmctl list
+vmctl streaming-open -Vm win-vm-1
+vmctl streaming-open -Vm win-vm-2
+```
+
+Fermer la fenetre du flux Moonlight courant avant de choisir une autre VM. `-Reconnect` reconnecte la VM selectionnee ; il ne ferme pas automatiquement le flux d'une autre VM. Chaque VM conserve son appairage et sa cadence dans son propre profil.
 
 - **Windows dans Hyper-V local : PowerShell Direct** (`Invoke-Command`, `New-PSSession`, `Copy-Item -ToSession`). Aucun SSH, IP, pare-feu ou WinRM a preparer.
 - **Linux, autres hyperviseurs, machines distantes : SSH/SFTP**. Serveur SSH et cle hote verifiee requis.

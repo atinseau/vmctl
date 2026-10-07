@@ -9,6 +9,7 @@ Depuis la racine, avec PowerShell 7.2+ sur Windows (generer les lanceurs avant l
 ```powershell
 .\install.ps1
 .\tests\Test-Vmctl.ps1
+.\tests\Test-AdminBroker.ps1
 .\tests\Test-DataPaths.ps1
 .\tests\Test-PowerShellDirect.ps1
 .\tests\Test-ConsoleGuards.ps1
