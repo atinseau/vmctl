@@ -6,6 +6,7 @@ param(
     [string]$VmId,
     [string]$HostName,
     [switch]$Diagnostics,
+    [switch]$VideoSettingsOnly,
     [ValidateSet('status','display-fix','display-restore','video-test','video-restore')][string]$Mode='status',
     [ValidateSet('software','nvenc')][string]$Encoder,
     [switch]$DefaultAdapter, [switch]$ConsoleDisplay, [switch]$OnlyDisplay, [switch]$PrimaryDisplay, [switch]$DisableRealtimePriority, [switch]$EnableModernCodecs,
@@ -13,6 +14,8 @@ param(
     [ValidateSet('disabled','quarter_res','full_res')][string]$NvencTwoPass
 )
 $ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+if($VideoSettingsOnly -and (-not $Diagnostics -or $Mode -ne 'status')){throw 'VideoSettingsOnly requires read-only status diagnostics.'}
 . (Join-Path $PSScriptRoot '../src/DataPaths.ps1')
 if ($Mode -eq 'video-test' -and -not $Encoder) { throw 'video-test requires an encoder.' }
 if ($EnableModernCodecs -and ($Mode -ne 'video-test' -or $Encoder -ne 'nvenc')) { throw 'EnableModernCodecs requires video-test with nvenc.' }
@@ -38,6 +41,17 @@ $hosts=@(Get-ChildItem -LiteralPath $registry -ErrorAction Stop | ForEach-Object
 if ($hosts.Count -ne 1 -or -not $hosts[0].srvcert) { throw 'Select a unique paired Moonlight host with its stored server certificate.' }
 $selected=$hosts[0]
 $address=if ($HostName) { $HostName } elseif ($selected.localaddress) { $selected.localaddress } else { $selected.manualaddress }
+if(-not $HostName -and $binding -and $binding.vmId){
+    Import-Module (Join-Path $PSScriptRoot '../src/Vmctl.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../src/StreamingSupport.psm1') -Force
+    $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if((Test-VmctlBrokerInstalled) -or $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
+        $network=Invoke-VmctlHyperV -Target @{os='windows';hypervisor='hyperv';vmName=$VmName;vmId=[string]$binding.vmId} -Action network -TimeoutSeconds 20
+        if($network.ExitCode -ne 0){throw "Impossible de vérifier l'adresse Hyper-V : $($network.Stderr)"}
+        $guestNetwork=$network.Stdout|ConvertFrom-Json
+        $address=Select-VmctlApolloAddress -GuestAddresses $guestNetwork.addresses -CachedAddress $address
+    }
+}
 $ip=$null
 if (-not[Net.IPAddress]::TryParse($address,[ref]$ip) -or $ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw 'A cached IPv4 address is required.' }
 $pem=[string]$selected.srvcert
@@ -70,6 +84,7 @@ public static class VmctlPinnedApolloClient {
 $client=[VmctlPinnedApolloClient]::Create($expectedHash)
 $baseUri="https://${address}:47990"
 $content=$null; $response=$null
+$requestPath='/api/login'
 try {
     $credential=Import-Clixml -LiteralPath $credentialPath
     $json=@{username=$credential.UserName;password=$credential.GetNetworkCredential().Password} | ConvertTo-Json -Compress
@@ -78,13 +93,18 @@ try {
     $null=$response.EnsureSuccessStatusCode()
     $response.Dispose(); $response=$null
     $content.Dispose(); $content=$null; $json=$null
-    $response=$client.GetAsync($baseUri+'/api/clients/list').GetAwaiter().GetResult()
-    $null=$response.EnsureSuccessStatusCode()
-    $result=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
-    if (-not $result.status) { throw 'Apollo did not return the paired client list.' }
+    $result=@{status=$true;named_certs=@()}
+    if(-not $VideoSettingsOnly){
+        $requestPath='/api/clients/list'
+        $response=$client.GetAsync($baseUri+$requestPath).GetAwaiter().GetResult()
+        $null=$response.EnsureSuccessStatusCode()
+        $result=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
+        if (-not $result.status) { throw 'Apollo did not return the paired client list.' }
+    }
     $configurationResult=$null
     if ($Mode -ne 'status') {
         if (@($result.named_certs | Where-Object connected).Count) { throw 'Disconnect the Moonlight stream before changing display configuration.' }
+        $requestPath='/api/config'
         $response.Dispose(); $response=$client.GetAsync($baseUri+'/api/config').GetAwaiter().GetResult()
         $null=$response.EnsureSuccessStatusCode()
         $current=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
@@ -162,6 +182,7 @@ try {
         if ($DisableRealtimePriority -and $verified.nvenc_realtime_hags -ne 'disabled') { throw 'NVENC realtime priority was not disabled.' }
         $response.Dispose(); $response=$null
         $content=[Net.Http.StringContent]::new('{}',[Text.Encoding]::UTF8,'application/json')
+        $requestPath='/api/restart'
         # Apollo may close this connection when restarting; verify its return afterward.
         try { $response=$client.PostAsync($baseUri+'/api/restart',$content).GetAwaiter().GetResult(); $null=$response.EnsureSuccessStatusCode() }
         catch [Net.Http.HttpRequestException] { }
@@ -169,6 +190,7 @@ try {
         do {
             Start-Sleep -Seconds 1
             try {
+                $requestPath='/login'
                 $restartProbe=$client.GetAsync($baseUri+'/login').GetAwaiter().GetResult()
                 $ready=$restartProbe.IsSuccessStatusCode; $restartProbe.Dispose()
             } catch { $ready=$false }
@@ -183,12 +205,18 @@ try {
     }
     $diagnostic=$null
     if ($Diagnostics) {
-        $response.Dispose(); $response=$client.GetAsync($baseUri+'/api/config').GetAwaiter().GetResult()
+        $requestPath='/api/config'
+        if($response){$response.Dispose()}
+        $response=$client.GetAsync($baseUri+'/api/config').GetAwaiter().GetResult()
         $null=$response.EnsureSuccessStatusCode()
         $settings=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
-        $response.Dispose(); $response=$client.GetAsync($baseUri+'/api/logs').GetAwaiter().GetResult()
-        $null=$response.EnsureSuccessStatusCode()
-        $log=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        $log=''
+        if(-not $VideoSettingsOnly){
+            $requestPath='/api/logs'
+            $response.Dispose(); $response=$client.GetAsync($baseUri+$requestPath).GetAwaiter().GetResult()
+            $null=$response.EnsureSuccessStatusCode()
+            $log=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        }
         $lines=@($log -split '\r?\n')
         $safeLines=@($lines | Where-Object { $_ -notmatch 'password|pin=|clientcert|rikey|Authorization|Cookie|^(Red|Green|Blue) Primary|Client dynamicRange' })
         $diagnostic=@{
@@ -207,6 +235,23 @@ try {
         configuration=$configurationResult
         guestWindowsCredentialRequired=$false;checkedAt=[DateTimeOffset]::UtcNow.ToString('o')
     } | ConvertTo-Json -Depth 6
+} catch {
+    $failureException=$_.Exception.GetBaseException()
+    $exception=$_.Exception
+    $isTimeout=$false
+    while($exception){
+        if($exception -is [TimeoutException] -or $exception -is [Threading.Tasks.TaskCanceledException]){$isTimeout=$true}
+        $exception=$exception.InnerException
+    }
+    if($isTimeout){[Console]::Error.WriteLine("APOLLO_TIMEOUT: ${baseUri}${requestPath} n’a pas répondu dans le délai de 15 secondes.")}
+    else{[Console]::Error.WriteLine(('API Apollo : '+$_.Exception.GetBaseException().Message))}
+    # Persist only request identity and error type, never bodies or credentials.
+    try{
+        $failureFolder=Join-Path (Get-VmctlDataRoot) "reports\streaming\$Vm"
+        $null=New-Item -ItemType Directory -Path $failureFolder -Force
+        @{vm=$Vm;address=$address;requestPath=$requestPath;mode=$Mode;timeout=$isTimeout;exceptionType=$failureException.GetType().FullName;failedAt=[DateTimeOffset]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $failureFolder 'apollo-last-failure.json') -Encoding utf8
+    }catch{ }
+    exit 1
 } finally {
     if ($response) { $response.Dispose() }
     if ($content) { $content.Dispose() }

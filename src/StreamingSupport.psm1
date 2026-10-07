@@ -63,8 +63,14 @@ function Remove-VmctlMoonlightHost {
     [pscustomobject]@{removed=$removed;uuid=$ServerUuid}
 }
 function Get-VmctlStreamEvidence {
-    param([string]$WindowTitle,[string]$HostName,[string]$Log)
+    param([string]$WindowTitle,[string]$HostName,[string]$Log,
+        [string]$ProcessCommandLine,[string]$ServerUuid)
     $windowMatches=($WindowTitle -ieq ($HostName+' - Moonlight'))
+    if($ServerUuid){
+        # Discovery may rename the host after launch. The process command line
+        # binds this window to the paired UUID; the cached label cannot do so.
+        $windowMatches=($WindowTitle -match '^.+ - Moonlight$' -and (Get-VmctlMoonlightProcessRole -CommandLine $ProcessCommandLine -ServerUuid $ServerUuid) -eq 'stream')
+    }
     # A GUI process can return to its launcher after losing a stream, and the
     # same log can contain several attempts. Inspect only the latest attempt.
     $streamStart=$Log.LastIndexOf('Starting video stream...',[StringComparison]::Ordinal)
@@ -155,4 +161,44 @@ function New-VmctlStreamingDisplayPlan {
     if($width -lt 320 -or $width -gt 16384 -or $height -lt 240 -or $height -gt 16384){throw 'Streaming dimensions are invalid.'}
     [pscustomobject]@{mode=$Mode;width=$width;height=$height;resolution="${width}x${height}";displayMode=$(if($Mode -eq 'fullscreen'){'fullscreen'}else{'windowed'});absoluteMouse=($Mode -ne 'fullscreen' -and $SavedAbsoluteMouse);captureSystemKeys=$(if($Mode -eq 'fullscreen'){'always'}else{'preferences'})}
 }
-Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Get-VmctlMoonlightProcessRole,Test-VmctlStreamingSessionFreshness,Get-VmctlPrimaryMonitor,Set-VmctlStreamOnPrimaryMonitor,New-VmctlStreamingDisplayPlan,Get-VmctlCapturedResolution
+function ConvertTo-VmctlStreamingErrorText {
+    param([AllowEmptyString()][string]$Text)
+    ([regex]::Replace($Text,'\x1B\[[0-?]*[ -/]*[@-~]','')).Trim()
+}
+function Select-VmctlApolloAddress {
+    param([string[]]$GuestAddresses,[string]$CachedAddress)
+    $current=@($GuestAddresses | Where-Object {
+        $parsed=$null
+        [Net.IPAddress]::TryParse($_,[ref]$parsed) -and $parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork -and $_ -notmatch '^(127\.|169\.254\.|0\.)'
+    } | Select-Object -Unique)
+    if($current.Count){
+        if($CachedAddress -in $current){return $CachedAddress}
+        return $current[0]
+    }
+    return $CachedAddress
+}
+function Invoke-VmctlStreamingStatusRead {
+    # Only callers performing a read may use this retry policy. Configuration
+    # writes and Moonlight launch/quit operations must never be replayed here.
+    param([Parameter(Mandatory)][scriptblock]$Read,
+        [ValidateRange(1,120)][int]$BudgetSeconds=60,
+        [ValidateRange(0,5)][int]$RetryDelaySeconds=1)
+    $clock=[Diagnostics.Stopwatch]::StartNew()
+    for($attempt=1;$attempt -le 3;$attempt++){
+        $remainingSeconds=$BudgetSeconds-$clock.Elapsed.TotalSeconds
+        if($remainingSeconds -le 0){break}
+        # The process API takes whole seconds; round only its final fraction.
+        $remaining=[int][Math]::Ceiling($remainingSeconds)
+        $result=& $Read ([Math]::Min(45,$remaining))
+        if($result.ExitCode -eq 0){return $result}
+        # The marker comes from a typed HTTP timeout, not authentication,
+        # certificate failures or invalid settings. 124 is the child deadline.
+        if($result.ExitCode -ne 124 -and $result.Stderr -notmatch '(?m)^APOLLO_TIMEOUT:'){return $result}
+        if($attempt -lt 3 -and $clock.Elapsed.TotalSeconds+$RetryDelaySeconds -lt $BudgetSeconds){
+            Start-Sleep -Seconds $RetryDelaySeconds
+        }
+    }
+    $details=if($result){ConvertTo-VmctlStreamingErrorText $result.Stderr}else{'Aucune requête terminée.'}
+    [pscustomobject]@{ExitCode=124;Stdout='';Stderr="Apollo ne répond pas après plusieurs tentatives (maximum ${BudgetSeconds}s).`nDernière erreur : $details"}
+}
+Export-ModuleMember -Function Get-VmctlMoonlightHost,Remove-VmctlMoonlightHost,Get-VmctlStreamEvidence,Get-VmctlMoonlightProcessRole,Test-VmctlStreamingSessionFreshness,Get-VmctlPrimaryMonitor,Set-VmctlStreamOnPrimaryMonitor,New-VmctlStreamingDisplayPlan,Get-VmctlCapturedResolution,Invoke-VmctlStreamingStatusRead,ConvertTo-VmctlStreamingErrorText,Select-VmctlApolloAddress

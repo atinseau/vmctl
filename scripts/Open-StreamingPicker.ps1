@@ -6,6 +6,7 @@ Add-Type -AssemblyName System.Windows.Forms
 try {
     Import-Module (Join-Path $PSScriptRoot '../src/Vmctl.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot '../src/ShortcutSupport.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../src/StreamingSupport.psm1') -Force
     if(-not $Config){$Config=Get-VmctlConfigPath}
     $choices=@(Get-VmctlStreamingChoices -Settings (Read-VmctlConfig $Config))
     if(-not $choices.Count){throw 'Aucune VM Windows Hyper-V configuree pour le streaming. Ajoutez une VM avec vmctl register.'}
@@ -28,9 +29,9 @@ try {
         $selected=$choices[$combo.SelectedIndex].alias
     }finally{$form.Dispose()}
     # Use the public CLI and its existing reconnect, credentials and validation.
-    $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') @('-NoProfile','-File',(Join-Path $PSScriptRoot '../vmctl.ps1'),'streaming-open','-Vm',$selected,'-Mode',$Mode,'-Reconnect','-Config',$Config) -TimeoutSeconds 320
+    $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') @('-NoProfile','-File',(Join-Path $PSScriptRoot '../vmctl.ps1'),'streaming-open','-Vm',$selected,'-Mode',$Mode,'-Reconnect','-Config',$Config) -TimeoutSeconds 440
     if($result.ExitCode -ne 0){throw $result.Stderr}
 }catch{
-    [void][Windows.Forms.MessageBox]::Show($_.ToString(),'vmctl - Ouverture impossible','OK','Error')
+    [void][Windows.Forms.MessageBox]::Show((ConvertTo-VmctlStreamingErrorText $_.Exception.Message),'vmctl - Ouverture impossible','OK','Error')
     exit 1
 }

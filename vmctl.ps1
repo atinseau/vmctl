@@ -283,7 +283,7 @@ Les autres codes sont ceux du programme distant (ou de scp).
             if($target.ContainsKey('vmId')){$openArgs+=@('-VmId',$target.vmId)}
             if($Reconnect){$openArgs+='-Reconnect'}
             if($PSBoundParameters.ContainsKey('Fps')){$openArgs+=@('-Fps',[string]$Fps)}
-            $openTimeout=if($PSBoundParameters.ContainsKey('TimeoutSeconds')){$TimeoutSeconds}else{300}
+            $openTimeout=if($PSBoundParameters.ContainsKey('TimeoutSeconds')){$TimeoutSeconds}else{420}
             $result=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $openArgs -TimeoutSeconds $openTimeout
         }
         'streaming-forget' {

@@ -7,6 +7,7 @@ param(
     [ValidateSet('windowed','fullscreen')][string]$Mode='windowed'
 )
 $ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 Import-Module (Join-Path $PSScriptRoot '../src/Vmctl.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../src/StreamingSupport.psm1') -Force
 $launchLock=[Threading.Mutex]::new($false,('Local\vmctl-moonlight-'+[Security.Principal.WindowsIdentity]::GetCurrent().User.Value))
@@ -94,10 +95,10 @@ if($processes.Count) {
 }
 if(-not $alreadyOpen) {
     if($Application -eq 'Virtual Display'){
-        $displayStatusArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'Get-StreamingStatus.ps1'),'-Vm',$Vm,'-VmName',$VmName,'-Diagnostics')
+        $displayStatusArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'Get-StreamingStatus.ps1'),'-Vm',$Vm,'-VmName',$VmName,'-Diagnostics','-VideoSettingsOnly')
         if($VmId){$displayStatusArgs+=@('-VmId',$VmId)}
-        $displayStatusResult=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $displayStatusArgs -TimeoutSeconds 45
-        if($displayStatusResult.ExitCode -ne 0){throw "Cannot inspect automatic guest display configuration: $($displayStatusResult.Stderr)"}
+        $displayStatusResult=Invoke-VmctlStreamingStatusRead -Read {param($timeout) Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $displayStatusArgs -TimeoutSeconds $timeout}
+        if($displayStatusResult.ExitCode -ne 0){throw "Impossible de vérifier l'affichage de ${VmName} : $($displayStatusResult.Stderr)"}
         $settings=($displayStatusResult.Stdout|ConvertFrom-Json).diagnostics.videoSettings
         $expectedDisplay=if($settings.headless_mode -eq 'enabled' -and $settings.adapter_name -match '^NVIDIA '){'ensure_only_display'}else{'ensure_primary'}
         if($settings.dd_configuration_option -ne $expectedDisplay -or $settings.dd_resolution_option -ne 'auto' -or $settings.dd_refresh_rate_option -ne 'auto'){
@@ -140,6 +141,8 @@ if(-not $alreadyOpen) {
         $process=[Diagnostics.Process]::Start($info)
     }
 }
+$streamCommandLine=[string](Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)").CommandLine
+if((Get-VmctlMoonlightProcessRole -CommandLine $streamCommandLine -ServerUuid $uuid) -ne 'stream'){throw 'Impossible de confirmer le serveur du processus Moonlight.'}
 $record=@{vm=$Vm;serverUuid=$uuid;application=$Application;pid=$process.Id;startTicks=$process.StartTime.ToUniversalTime().Ticks;resolution="${width}x${height}";fps=$fps;absoluteMouse=$absolute;logPath=$logPath;mode=$Mode;displayMode=$display.displayMode}
 $record.imageVerified=$false
 $record.captureSystemKeys=$display.captureSystemKeys
@@ -161,7 +164,7 @@ do {
         throw "Moonlight exited while opening the stream (exit $($process.ExitCode)); $details"
     }
     $log=if($logPath -and (Test-Path -LiteralPath $logPath)){Get-Content -LiteralPath $logPath -Raw}else{''}
-    $evidence=Get-VmctlStreamEvidence -WindowTitle $process.MainWindowTitle -HostName $hosts[0].hostname -Log $log
+    $evidence=Get-VmctlStreamEvidence -WindowTitle $process.MainWindowTitle -HostName $hosts[0].hostname -Log $log -ProcessCommandLine $streamCommandLine -ServerUuid $uuid
     if($evidence.disconnected){
         $record.logPath=$logPath;$record.streamWindowOpen=$false;$record.videoDeliveryVerified=$false
         $record.streamState='disconnected';$record.failure=$evidence.failure
@@ -176,7 +179,13 @@ do {
     }else{$receivingSince=$null}
     Start-Sleep -Milliseconds 250
 } while((Get-Date) -lt $deadline)
-if($process.MainWindowHandle -eq 0 -or -not $evidence.ready -or $null -eq $receivingSince -or ((Get-Date)-$receivingSince).TotalSeconds -lt 8){throw "The matching Moonlight window is not receiving video yet; see $logPath"}
+if($process.MainWindowHandle -eq 0 -or -not $evidence.ready -or $null -eq $receivingSince -or ((Get-Date)-$receivingSince).TotalSeconds -lt 8){
+    $record.logPath=$logPath;$record.windowTitle=$process.MainWindowTitle
+    $record.streamWindowOpen=($process.MainWindowHandle -ne 0);$record.videoDeliveryVerified=$false
+    $record.streamState='startup-unverified';$record.startupEvidence=$evidence
+    $record|ConvertTo-Json -Depth 4|Set-Content -LiteralPath $activePath
+    throw "Moonlight est ouvert, mais son démarrage n'a pas pu être confirmé : fenêtre=$($evidence.windowMatches), paquets=$($evidence.videoReceived), décodeur=$($evidence.decoderChosen). Journal : $logPath"
+}
 $record.logPath=$logPath;$record.windowTitle=$process.MainWindowTitle;$record.windowHandle=$process.MainWindowHandle.ToInt64()
 if($Mode -eq 'fullscreen'){Set-VmctlStreamOnPrimaryMonitor -WindowHandle $process.MainWindowHandle}
 $record.streamWindowOpen=$true;$record.videoDeliveryVerified=$true;$record.alreadyOpen=$alreadyOpen
@@ -184,8 +193,8 @@ $record.streamState='receiving';$record.startupObservationSeconds=8
 if($Application -eq 'Virtual Display'){
     $statusArgs=@('-NoProfile','-File',(Join-Path $PSScriptRoot 'Get-StreamingStatus.ps1'),'-Vm',$Vm,'-VmName',$VmName,'-Diagnostics')
     if($VmId){$statusArgs+=@('-VmId',$VmId)}
-    $statusResult=Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $statusArgs -TimeoutSeconds 45
-    if($statusResult.ExitCode -ne 0){throw "Cannot verify the guest display resolution: $($statusResult.Stderr)"}
+    $statusResult=Invoke-VmctlStreamingStatusRead -Read {param($timeout) Invoke-VmctlProcess (Join-Path $PSHOME 'pwsh.exe') $statusArgs -TimeoutSeconds $timeout}
+    if($statusResult.ExitCode -ne 0){throw "Impossible de vérifier la résolution de ${VmName} : $($statusResult.Stderr)"}
     $status=$statusResult.Stdout|ConvertFrom-Json
     $capture=Get-VmctlCapturedResolution -Lines $status.diagnostics.log -NotBefore $process.StartTime
     $record.guestResolution=$capture
@@ -201,6 +210,9 @@ if($PSBoundParameters.ContainsKey('Fps')){
 }
 $record|ConvertTo-Json|Set-Content -LiteralPath $activePath
 $record|ConvertTo-Json
+}catch{
+    [Console]::Error.WriteLine((ConvertTo-VmctlStreamingErrorText $_.Exception.Message))
+    exit 1
 }finally{
     if($lockTaken){$launchLock.ReleaseMutex()}
     $launchLock.Dispose()

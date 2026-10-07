@@ -1,6 +1,6 @@
 #requires -Version 7.2
 function Invoke-VmctlHyperV {
-    param([hashtable]$Target, [ValidateSet('checkpoint', 'start', 'stop', 'restart', 'storage', 'compact')][string]$Action,
+    param([hashtable]$Target, [ValidateSet('checkpoint', 'start', 'stop', 'restart', 'storage', 'compact', 'network')][string]$Action,
         [string]$Name, [switch]$RemoveCheckpoints, [switch]$DisableAutomaticCheckpoints, [int]$TimeoutSeconds = 120)
     if (-not $IsWindows -or $Target.hypervisor -ne 'hyperv' -or -not $Target.vmName) {
         throw 'Cette action exige un hote Windows et une cible avec hypervisor=hyperv et vmName.'
@@ -29,6 +29,10 @@ try {
     $vmctlVm = Get-VM -Name $vmctlName | Where-Object { $_.Name -eq $vmctlName }
     if (@($vmctlVm).Count -ne 1) { throw 'La cible Hyper-V doit identifier exactement une VM.' }
     if ('__ID__' -and $vmctlVm.Id.ToString() -ine '__ID__') { throw 'Le GUID de la VM a change ; operation refusee.' }
+    if ('__ACTION__' -eq 'network') {
+        [pscustomobject]@{vm=$vmctlVm.Name;vmId=$vmctlVm.Id.ToString();state=$vmctlVm.State.ToString();addresses=@(Get-VMNetworkAdapter -VM $vmctlVm | ForEach-Object {$_.IPAddresses})} | ConvertTo-Json -Depth 3
+        exit 0
+    }
     if ('__ACTION__' -in @('storage','compact')) {
         if ('__ACTION__' -eq 'compact' -and $vmctlVm.State -ne 'Off') { throw 'compact exige une VM arretee. Utilisez vmctl stop au prealable.' }
         $removed=@()

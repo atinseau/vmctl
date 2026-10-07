@@ -24,7 +24,7 @@ Depuis la racine, avec PowerShell 7.2+ sur Windows (generer les lanceurs avant l
 | `Test-DataPaths.ps1` | Migration sans remplacement, preservation de l'appairage, exclusion des caches expires et racine identique dans PowerShell 5.1 et 7. |
 | `Test-ConsoleGuards.ps1` | Captures, entrees, usage unique des frames et conversion RGB565, sans console VM. |
 | `Test-GpuPlanning.ps1` | Calcul UInt64 des budgets, empreintes et refus de chemins dangereux. |
-| `Test-StreamingSupport.ps1` | Profils par UUID/adresse, conservation de QSettings, expiration avec dates JSON et refus de faux indicateurs de reception video. |
+| `Test-StreamingSupport.ps1` | Profils par UUID/adresse, conservation de QSettings, expiration avec dates JSON, refus de faux indicateurs de reception video, reprise bornee des lectures Apollo et erreurs sans codes ANSI. |
 
 Les fixtures restent dans `work/`, ignore par Git. Certains essais de compilateur ou de shell POSIX sont ignores si ces outils sont indisponibles ; le resultat le signale. Un test local reussi ne confirme pas un streaming dans une VM.
 Le test CLI appelle le lanceur global depuis PowerShell 7 et Windows PowerShell 5.1, avec Unicode, guillemets, commande de plus de 64 Ko, commutateur explicitement false et PSCredential. Il verifie aussi la conservation du code de sortie et de stderr.

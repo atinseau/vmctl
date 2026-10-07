@@ -11,6 +11,44 @@ function Assert-That([bool]$Condition,[string]$Label) {
     $script:passed++; Write-Output "OK: $Label"
 }
 try {
+    Assert-That ((Select-VmctlApolloAddress -GuestAddresses @('172.17.162.12','fe80::123','127.0.0.1') -CachedAddress '172.23.240.168') -eq '172.17.162.12') 'A stale Moonlight address is replaced by the current Hyper-V guest address'
+    Assert-That ((Select-VmctlApolloAddress -GuestAddresses @('10.0.0.2','172.17.162.12') -CachedAddress '172.17.162.12') -eq '172.17.162.12') 'A current cached address is preferred on a guest with multiple interfaces'
+    Assert-That ((Select-VmctlApolloAddress -GuestAddresses @('fe80::123','169.254.0.1') -CachedAddress '172.17.162.12') -eq '172.17.162.12') 'Missing integration-service IPv4 falls back to the paired cache'
+    $readState=@{calls=0;timeouts=@()}
+    $recovered=Invoke-VmctlStreamingStatusRead -RetryDelaySeconds 0 -Read {
+        param($timeout)
+        $readState.calls++;$readState.timeouts+=,$timeout
+        if($readState.calls -lt 3){return @{ExitCode=1;Stdout='';Stderr='APOLLO_TIMEOUT: API starting'}}
+        @{ExitCode=0;Stdout='{"ready":true}';Stderr=''}
+    }
+    Assert-That ($recovered.ExitCode -eq 0 -and $readState.calls -eq 3 -and $recovered.Stdout -eq '{"ready":true}') 'Apollo startup timeouts recover without losing the status response'
+    $readState.calls=0
+    $unavailable=Invoke-VmctlStreamingStatusRead -BudgetSeconds 2 -RetryDelaySeconds 0 -Read {
+        param($timeout)
+        $readState.calls++;$readState.timeout=$timeout
+        @{ExitCode=124;Stdout='';Stderr='child deadline'}
+    }
+    Assert-That ($unavailable.ExitCode -eq 124 -and $readState.calls -eq 3) 'Persistent timeouts stop after three attempts with an understandable error'
+    Assert-That ($unavailable.Stderr -match 'Dernière erreur : child deadline') 'The final error retains the failed request detail for diagnosis'
+    Assert-That ($readState.timeout -le 2 -and $unavailable.Stderr -notmatch '\x1B') 'Every status child is bounded by the remaining total budget'
+    $readState.calls=0
+    $expired=Invoke-VmctlStreamingStatusRead -BudgetSeconds 1 -RetryDelaySeconds 0 -Read {
+        param($timeout)
+        $readState.calls++;Start-Sleep -Milliseconds 1100
+        @{ExitCode=124;Stdout='';Stderr='child deadline'}
+    }
+    Assert-That ($expired.ExitCode -eq 124 -and $readState.calls -eq 1) 'The total deadline prevents further attempts even before the third try'
+    foreach($failure in @('TLS certificate mismatch','401 Unauthorized','Invalid streaming binding')){
+        $readState.calls=0
+        $rejected=Invoke-VmctlStreamingStatusRead -RetryDelaySeconds 0 -Read {
+            param($timeout)
+            $readState.calls++
+            @{ExitCode=1;Stdout='';Stderr=$failure}
+        }
+        Assert-That ($readState.calls -eq 1 -and $rejected.Stderr -eq $failure) "No retry conceals $failure"
+    }
+    $plain=ConvertTo-VmctlStreamingErrorText "`e[31;1mL’API Apollo ne répond pas.`e[0m`r`n"
+    Assert-That ($plain -eq "L’API Apollo ne répond pas.") 'Popup errors remove ANSI sequences and retain French text'
     $captureLines=@('[2026-10-06 19:00:00.000]: Info: Desktop resolution [1920x1080]', '[2026-10-06 19:01:01.123]: Info: Desktop resolution [2560x1440]')
     Assert-That ((Get-VmctlCapturedResolution -Lines $captureLines -NotBefore ([datetime]'2026-10-06T19:01:00')) -eq '2560x1440') 'Guest verification reads the capture dimensions after stream startup'
     Assert-That ((Get-VmctlCapturedResolution -Lines $captureLines -NotBefore ([datetime]'2026-10-06T19:02:00')) -eq '') 'Old capture evidence cannot verify a new stream'
@@ -55,6 +93,11 @@ try {
     Assert-That (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' $realLog).ready 'Window and real video reception prove readiness'
     Assert-That (-not (Get-VmctlStreamEvidence 'Moonlight' 'win-vm' $realLog).ready) 'Launcher window does not prove stream readiness'
     Assert-That (-not (Get-VmctlStreamEvidence 'other-vm - Moonlight' 'win-vm' $realLog).ready) 'Another VM window is rejected'
+    $matchingProcess='Moonlight.exe stream '+$processUuid+' "Virtual Display"'
+    Assert-That (Get-VmctlStreamEvidence 'renamed-vm - Moonlight' 'old-cached-name' $realLog -ProcessCommandLine $matchingProcess -ServerUuid $processUuid).ready 'Paired process UUID accepts a renamed host without relying on its cached label'
+    Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' $realLog -ProcessCommandLine ('Moonlight.exe stream '+[guid]::NewGuid().ToString()+' Desktop') -ServerUuid $processUuid).ready) 'An exact window label cannot override a different process UUID'
+    Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' $realLog -ProcessCommandLine ('Moonlight.exe list '+$processUuid) -ServerUuid $processUuid).ready) 'A CLI helper cannot supply stream readiness even with matching UUID and label'
+    Assert-That (-not (Get-VmctlStreamEvidence 'Moonlight' 'win-vm' $realLog -ProcessCommandLine $matchingProcess -ServerUuid $processUuid).ready) 'A verified process returning to the launcher is not an open stream'
     Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' 'Test decode successful').ready) 'Decoder self-test does not prove reception'
     Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' 'FFmpeg-based video decoder chosen').ready) 'Configured decoder without packets is not ready'
     Assert-That (-not (Get-VmctlStreamEvidence 'win-vm - Moonlight' 'win-vm' 'Received first video packet after 300 ms').ready) 'Packets without a chosen decoder are not ready'

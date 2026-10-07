@@ -30,6 +30,14 @@ vmctl streaming-open -Vm win-vm-2
 
 Fermer la fenetre du flux Moonlight courant avant de choisir une autre VM. `-Reconnect` reconnecte la VM selectionnee ; il ne ferme pas automatiquement le flux d'une autre VM. Chaque VM conserve son appairage et sa cadence dans son propre profil.
 
+Pendant l'ouverture, les lectures d'etat Apollo tolerent les timeouts transitoires : trois tentatives au maximum, dans un budget total de 60 secondes par inspection. Les erreurs de certificat, d'authentification et de configuration restent immediates. Les modifications de configuration et les commandes Moonlight ne sont pas rejouees. Les raccourcis affichent une erreur en texte simple si l'ouverture echoue.
+
+La verification initiale de l'affichage lit seulement la configuration video, sans telecharger les journaux ou la liste des clients. Une erreur API enregistre son adresse, sa route, son type et sa date dans `reports/streaming/<alias>/apollo-last-failure.json`, sous la racine de donnees vmctl. Aucun identifiant ni contenu de requete n'y est conserve.
+
+Avec le mode privilegie actif (ou un terminal administrateur), l'adresse Apollo est verifiee via les cartes reseau de la VM Hyper-V identifiee par nom et GUID. Cela evite de reutiliser une ancienne adresse enregistree par Moonlight a sa fermeture. Le certificat du serveur reste verifie contre celui de l'appairage. Si les services d'integration ne fournissent aucune IPv4, le cache appaire reste le recours.
+
+La verification du flux associe le processus Moonlight au UUID appaire plutot qu'au nom d'hote mis en cache, qui peut changer pendant la decouverte. Elle exige toujours une fenetre de flux, un decodeur choisi et des paquets video recus, observes sans deconnexion pendant huit secondes. Un demarrage non confirme conserve les indicateurs observes dans `streaming-active.json` pour distinguer une fenetre ouverte d'une reception verifiee.
+
 - **Windows dans Hyper-V local : PowerShell Direct** (`Invoke-Command`, `New-PSSession`, `Copy-Item -ToSession`). Aucun SSH, IP, pare-feu ou WinRM a preparer.
 - **Linux, autres hyperviseurs, machines distantes : SSH/SFTP**. Serveur SSH et cle hote verifiee requis.
 - `transport: "auto"` choisit Direct pour Windows + Hyper-V, SSH sinon. `psdirect` et `ssh` permettent un choix explicite. `-Transport` le remplace pour un appel.
